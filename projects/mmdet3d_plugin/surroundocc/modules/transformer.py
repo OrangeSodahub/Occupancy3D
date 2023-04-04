@@ -40,7 +40,9 @@ class PerceptionTransformer(BaseModule):
                  two_stage_num_proposals=300,
                  encoder=None,
                  embed_dims=256,
+                 use_shift=True,
                  use_cams_embeds=True,
+                 rotate_prev_feat=True,
                  rotate_center=[100, 100],
                  **kwargs):
         super(PerceptionTransformer, self).__init__(**kwargs)
@@ -52,7 +54,9 @@ class PerceptionTransformer(BaseModule):
         self.num_cams = num_cams
         self.fp16_enabled = False
 
+        self.use_shift = use_shift
         self.use_cams_embeds = use_cams_embeds
+        self.rotate_prev_feat = rotate_prev_feat
 
         self.two_stage_num_proposals = two_stage_num_proposals
         self.init_layers()
@@ -89,11 +93,58 @@ class PerceptionTransformer(BaseModule):
             volume_h,
             volume_w,
             volume_z,
+            grid_length,
+            volume_pos=None,
+            prev_feat=None,
             **kwargs):
 
         bs = mlvl_feats[0].size(0)
         # `volume_queries`: (H*W*Z, C) -> (H*W*Z, bs, C)
+        # `volume_pos`: (bs, pos_dim, H, W) -> (H*W*Z, bs, pos_dim)
+        # TODO: verify, here pos_dim=128, only use volume_pos when C=128
         volume_queries = volume_queries.unsqueeze(1).repeat(1, bs, 1)
+        if volume_pos is not None:
+            volume_pos = volume_pos.unsqueeze(4).repeat(1, 1, 1, 1, volume_z).flatten(2).permute(2, 0, 1)
+
+        # obtain rotation angle and shift with ego motion
+        delta_x = np.array([each['can_bus'][0]
+                           for each in kwargs['img_metas']])
+        delta_y = np.array([each['can_bus'][1]
+                           for each in kwargs['img_metas']])
+        ego_angle = np.array(
+            [each['can_bus'][-2] / np.pi * 180 for each in kwargs['img_metas']])
+        grid_length_y = grid_length[0]
+        grid_length_x = grid_length[1]
+        translation_length = np.sqrt(delta_x ** 2 + delta_y ** 2)
+        translation_angle = np.arctan2(delta_y, delta_x) / np.pi * 180
+        bev_angle = ego_angle - translation_angle
+        shift_y = translation_length * \
+            np.cos(bev_angle / 180 * np.pi) / grid_length_y / volume_w
+        shift_x = translation_length * \
+            np.sin(bev_angle / 180 * np.pi) / grid_length_x / volume_h
+        shift_y = shift_y * self.use_shift
+        shift_x = shift_x * self.use_shift
+        shift = volume_queries.new_tensor(
+            [shift_x, shift_y]).permute(1, 0)  # xy, bs -> bs, xy
+
+        if prev_feat is not None:
+
+            if prev_feat.shape[1] == volume_h * volume_w * volume_z:
+                prev_feat = prev_feat.permute(1, 0, 2)
+            elif len(prev_feat.shape) == 4:
+                prev_feat = prev_feat.view(bs, -1, volume_h * volume_w * volume_z).permute(2, 0, 1)
+
+            if self.rotate_prev_feat:
+                for i in range(bs):
+                    # num_prev_bev = prev_bev.size(1)
+                    rotation_angle = kwargs['img_metas'][i]['can_bus'][-1]
+                    tmp_prev_feat = prev_feat[:, i].reshape(
+                        volume_h, volume_w, -1).permute(2, 0, 1)
+                    tmp_prev_feat = rotate(tmp_prev_feat, rotation_angle,
+                                          center=self.rotate_center)
+                    tmp_prev_feat = tmp_prev_feat.permute(1, 2, 0).reshape(
+                        volume_h * volume_w * volume_z, 1, -1)
+                    prev_feat[:, i] = tmp_prev_feat[:, 0]
 
         feat_flatten = []
         spatial_shapes = []
@@ -127,8 +178,11 @@ class PerceptionTransformer(BaseModule):
                 volume_h=volume_h,
                 volume_w=volume_w,
                 volume_z=volume_z,
+                volume_pos=volume_pos,
                 spatial_shapes=spatial_shapes,
                 level_start_index=level_start_index,
+                prev_feat=prev_feat,
+                shift=shift,
                 **kwargs
             )
 

@@ -126,9 +126,10 @@ class MyCustomBaseTransformerLayer(BaseModule):
         self.pre_norm = operation_order[0] == 'norm'
         self.attentions = ModuleList()
 
-        index = 0
+        attn_cfgs_order = ['cross_attn', 'self_attn']
         for operation_name in operation_order:
-            if operation_name in ['self_attn', 'cross_attn']:
+            if operation_name in attn_cfgs_order:
+                index = attn_cfgs_order.index(operation_name)
                 if 'batch_first' in attn_cfgs[index]:
                     assert self.batch_first == attn_cfgs[index]['batch_first']
                 else:
@@ -138,9 +139,9 @@ class MyCustomBaseTransformerLayer(BaseModule):
                 # or `cross_attn` can have different behavior.
                 attention.operation_name = operation_name
                 self.attentions.append(attention)
-                index += 1
 
-        self.embed_dims = self.attentions[0].embed_dims
+        # Set the embed_dims of cross attention
+        self.embed_dims = self.attentions[-1].embed_dims
 
         self.ffns = ModuleList()
         num_ffns = operation_order.count('ffn')
@@ -150,10 +151,11 @@ class MyCustomBaseTransformerLayer(BaseModule):
             ffn_cfgs = [copy.deepcopy(ffn_cfgs) for _ in range(num_ffns)]
         assert len(ffn_cfgs) == num_ffns
         for ffn_index in range(num_ffns):
-            if 'embed_dims' not in ffn_cfgs[ffn_index]:
-                ffn_cfgs['embed_dims'] = self.embed_dims
-            else:
-                assert ffn_cfgs[ffn_index]['embed_dims'] == self.embed_dims
+            # TODO: verify this
+            # if 'embed_dims' not in ffn_cfgs[ffn_index]:
+            #     ffn_cfgs['embed_dims'] = self.embed_dims
+            # else:
+            #     assert ffn_cfgs[ffn_index]['embed_dims'] == self.embed_dims
 
             self.ffns.append(
                 build_feedforward_network(ffn_cfgs[ffn_index]))

@@ -1,17 +1,16 @@
 
 import torch
 import random
-import pdb, os
+import copy, os
 import numpy as np
 from tqdm import tqdm
 from os import path as osp
 
-import mmcv
 from mmdet.datasets import DATASETS
 from mmdet3d.datasets import NuScenesDataset
 from mmcv.parallel import DataContainer as DC
-from nuscenes.utils.geometry_utils import transform_matrix, Quaternion
-from projects.mmdet3d_plugin.models.utils.visual import save_tensor
+from nuscenes.utils.geometry_utils import transform_matrix
+from nuscenes.eval.common.utils import quaternion_yaw, Quaternion
 from projects.mmdet3d_plugin.datasets.evaluation_metrics import Metric_mIoU, Metric_FScore
 
 
@@ -22,11 +21,12 @@ class CustomNuScenesOccDataset(NuScenesDataset):
     This datset only add camera intrinsics and extrinsics to the results.
     """
 
-    def __init__(self, occ_size, pc_range, use_semantic=False, classes=None, overlap_test=False, eval_fscore=False, *args, **kwargs):
+    def __init__(self, occ_size, pc_range, queue_length=4,use_semantic=False, classes=None, overlap_test=False, eval_fscore=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.overlap_test = overlap_test
         self.occ_size = occ_size
         self.pc_range = pc_range
+        self.queue_length = queue_length
         self.use_semantic = use_semantic
         self.class_names = classes
         self.eval_fscore = eval_fscore
@@ -41,12 +41,48 @@ class CustomNuScenesOccDataset(NuScenesDataset):
         Returns:
             dict: Training data dict of the corresponding index.
         """
-        input_dict = self.get_data_info(index)
-        if input_dict is None:
-            return None
-        self.pre_pipeline(input_dict)
-        example = self.pipeline(input_dict)
-        return example
+        queue = []
+        index_list = list(range(index - self.queue_length, index))
+        random.shuffle(index_list)
+        index_list = sorted(index_list[1:])
+        index_list.append(index)
+        for i in index_list:
+            i = max(0, i)
+            input_dict = self.get_data_info(i)
+            if input_dict is None:
+                return None
+            self.pre_pipeline(input_dict)
+            example = self.pipeline(input_dict)
+            queue.append(example)
+        return self.union2one(queue)
+
+    def union2one(self, queue):
+        imgs_list = [each['img'].data for each in queue]
+        metas_map = {}
+        prev_scene_token = None
+        prev_pos = None
+        prev_angle = None
+        for i, each in enumerate(queue):
+            metas_map[i] = each['img_metas'].data
+            if metas_map[i]['scene_token'] != prev_scene_token:
+                metas_map[i]['prev_feat_exists'] = False
+                prev_scene_token = metas_map[i]['scene_token']
+                prev_pos = copy.deepcopy(metas_map[i]['can_bus'][:3])
+                prev_angle = copy.deepcopy(metas_map[i]['can_bus'][-1])
+                metas_map[i]['can_bus'][:3] = 0
+                metas_map[i]['can_bus'][-1] = 0
+            else:
+                metas_map[i]['prev_feat_exists'] = True
+                tmp_pos = copy.deepcopy(metas_map[i]['can_bus'][:3])
+                tmp_angle = copy.deepcopy(metas_map[i]['can_bus'][-1])
+                metas_map[i]['can_bus'][:3] -= prev_pos
+                metas_map[i]['can_bus'][-1] -= prev_angle
+                prev_pos = copy.deepcopy(tmp_pos)
+                prev_angle = copy.deepcopy(tmp_angle)
+        queue[-1]['img'] = DC(torch.stack(imgs_list), cpu_only=False, stack=True)
+        queue[-1]['img_metas'] = DC(metas_map, cpu_only=True)
+        queue = queue[-1]
+        return queue
 
     def get_data_info(self, index):
         """Get data info according to the given index.
@@ -71,15 +107,24 @@ class CustomNuScenesOccDataset(NuScenesDataset):
         # standard protocal modified from SECOND.Pytorch
         input_dict = dict(
             occ_path = info['occ_gt_path'],
+            sample_idx = info['token'],
+            frame_idx = info['frame_idx'],
+            prev_idx = info['prev'],
+            next_idx = info['next'],
+            scene_token = info['scene_token'],
+            can_bus = info['can_bus'],
             occ_size = np.array(self.occ_size),
-            pc_range = np.array(self.pc_range)
+            pc_range = np.array(self.pc_range),
+            timestamp = info['timestamp'] / 1e6,
+            ego2global_translation=info['ego2global_translation'],
+            ego2global_rotation=info['ego2global_rotation'],
         )
-
         lidar2ego_rotation = info['lidar2ego_rotation']
         lidar2ego_translation = info['lidar2ego_translation']
         ego2lidar = transform_matrix(translation=lidar2ego_translation, rotation=Quaternion(lidar2ego_rotation),
                                      inverse=True)
         input_dict['ego2lidar'] = ego2lidar
+
         if self.modality['use_camera']:
             image_paths = []
             lidar2img_rts = []
@@ -119,6 +164,18 @@ class CustomNuScenesOccDataset(NuScenesDataset):
         if not self.test_mode:
             annos = self.get_ann_info(index)
             input_dict['ann_info'] = annos
+
+        # Transform ego vehicle to global
+        rotation = Quaternion(input_dict['ego2global_rotation'])
+        translation = input_dict['ego2global_translation']
+        can_bus = input_dict['can_bus']
+        can_bus[:3] = translation
+        can_bus[3:7] = rotation
+        patch_angle = quaternion_yaw(rotation) / np.pi * 180
+        if patch_angle < 0:
+            patch_angle += 360
+        can_bus[-2] = patch_angle / 180 * np.pi
+        can_bus[-1] = patch_angle
 
         return input_dict
 

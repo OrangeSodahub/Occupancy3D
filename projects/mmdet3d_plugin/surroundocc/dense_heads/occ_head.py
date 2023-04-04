@@ -6,25 +6,19 @@
 
 import copy
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
 from mmdet.models import HEADS
-from mmcv.runner import force_fp32, auto_fp16
-import numpy as np
-import mmcv
-import cv2 as cv
-from projects.mmdet3d_plugin.models.utils.visual import save_tensor
-from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import multiscale_supervision, geo_scal_loss, sem_scal_loss
-from mmcv.cnn import build_conv_layer, build_norm_layer, build_upsample_layer
 from mmdet.models.utils import build_transformer
+from mmcv.runner import force_fp32, auto_fp16
 from mmcv.cnn.utils.weight_init import constant_init
-import os
-from torch.autograd import Variable
-try:
-    from itertools import  ifilterfalse
-except ImportError: # py3k
-    from itertools import  filterfalse as ifilterfalse
+from mmcv.cnn import build_conv_layer, build_norm_layer, build_upsample_layer
+from mmcv.cnn.bricks.transformer import build_positional_encoding
+
+from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import multiscale_supervision, geo_scal_loss, sem_scal_loss
+
 
 @HEADS.register_module()
 class OccHead(nn.Module): 
@@ -36,6 +30,7 @@ class OccHead(nn.Module):
                  volume_w=[100, 50, 25],
                  volume_z=[8, 4, 2],
                  occ_size=[200, 200, 16],
+                 pc_range=[-40, -40, -1.0, 40, 40, 5.4],
                  upsample_strides=[1, 2, 1, 2],
                  out_indices=[0, 2, 4, 6],
                  conv_input=None,
@@ -44,6 +39,7 @@ class OccHead(nn.Module):
                  img_channels=None,
                  use_semantic=True,
                  use_mask=False,
+                 positional_encoding=False,
                  **kwargs):
         super(OccHead, self).__init__()
         self.conv_input = conv_input
@@ -55,6 +51,7 @@ class OccHead(nn.Module):
         self.volume_w = volume_w
         self.volume_z = volume_z
         self.occ_size = occ_size
+        self.pc_range = pc_range
 
         self.img_channels = img_channels
 
@@ -66,6 +63,8 @@ class OccHead(nn.Module):
         self.upsample_strides = upsample_strides
         self.out_indices = out_indices
         self.transformer_template = transformer_template
+        self.positional_encoding = build_positional_encoding(
+            positional_encoding)
 
         self._init_layers()
 
@@ -73,6 +72,13 @@ class OccHead(nn.Module):
         self.transformer = nn.ModuleList()
         for i in range(self.fpn_level):
             transformer = copy.deepcopy(self.transformer_template)
+
+            # TODO: verify
+            # only the first layer uses the temporal_self_attention
+            if i > 0:
+                transformer.encoder.transformerlayers.attn_cfgs = (transformer.encoder.transformerlayers.attn_cfgs[0],)
+                transformer.encoder.transformerlayers.operation_order = \
+                    transformer.encoder.transformerlayers.operation_order[2:]
 
             # `transformer.embed_dims = [128, 256, 512]`
             transformer.embed_dims = transformer.embed_dims[i]
@@ -206,22 +212,33 @@ class OccHead(nn.Module):
                 constant_init(m.conv_offset, 0)
 
     @auto_fp16(apply_to=('mlvl_feats'))
-    def forward(self, mlvl_feats, img_metas):
+    def forward(self, mlvl_feats, img_metas, prev_feat=None, only_feat=False):
 
         # image feature map shape: (B, N, C, H, W)
         bs, num_cam, _, _, _ = mlvl_feats[0].shape
         dtype = mlvl_feats[0].dtype
 
-        volume_embed = []
 
+        volume_embed = []
         # fpn_level=3 (embeding_dims=[128, 256, 512])
         for i in range(self.fpn_level):
+            # only for obtaining the prev_feat
+            if only_feat and i > 0:
+                break
+
             # `volume_embedding[i]: (in) h[i]*w[i]*z[i] (out) embeding_dim[i]``
             # `                [0]: (in) 80000 (out) 128`
             # `                [1]: (in) 10000 (out) 256`
             # `                [2]: (in) 1250  (out) 512`
             # `volume_queries` of shape (80000, 128)/(10000, 256)/(1250, 512) => (H*W*Z, C)
             volume_queries = self.volume_embedding[i].weight.to(dtype)
+
+            volume_pos = None
+            if i == 0:
+                # volume_pos: (bs, num_feats*2, h, w)
+                volume_mask = torch.zeros((bs, self.volume_h[i], self.volume_w[i]),
+                                    device=volume_queries.device).to(dtype)
+                volume_pos = self.positional_encoding(volume_mask).to(dtype)
             
             # volume_h_ = [100, 50, 25]
             # volume_w_ = [100, 50, 25]
@@ -243,10 +260,22 @@ class OccHead(nn.Module):
                 volume_h=volume_h,
                 volume_w=volume_w,
                 volume_z=volume_z,
-                img_metas=img_metas
+                grid_length=((self.pc_range[3] - self.pc_range[0]) / self.occ_size[0],
+                             (self.pc_range[4] - self.pc_range[1]) / self.occ_size[1],
+                             (self.pc_range[5] - self.pc_range[2]) / self.occ_size[2],),
+                # TODO: verify this, only use temporal attention upon the last query
+                # the prev_feat corresponding the shape of (200, 200, 16)
+                volume_pos=volume_pos,
+                img_metas=img_metas,
+                prev_feat=prev_feat if i == 0 else None,
             )
             volume_embed.append(volume_embed_i)
         
+        # TODO
+        # return the embedding features (200, 200, 16)
+        # no predicts will generate
+        if only_feat:
+            return volume_embed[0]
 
         volume_embed_reshape = []
         for i in range(self.fpn_level):
@@ -319,16 +348,18 @@ class OccHead(nn.Module):
                 # `voxel_semantics` has the highest resolution
                 # Here we downsample the `voxel_semantics` to generate low level resolution labels
                 gt = multiscale_supervision(voxel_semantics.clone(), ratio, preds_dicts['occ_preds'][i].shape, self.coords_grid)
-                # align with the pred
+
+                # Transform `gt` from (bs, H, W, Z) to (bs, W, H, Z)
+                # `pred: (bs, num_classes, W, H, Z)`
                 gt = gt.permute(0, 2, 1, 3)
-                
+                # TODO: geo_scal_loss()
                 if not self.use_mask:
-                    loss_occ_i = (criterion(pred, gt.long()) + sem_scal_loss(pred, gt.long()) + geo_scal_loss(pred, gt.long()))
+                    loss_occ_i = (criterion(pred, gt.long()) + sem_scal_loss(pred, gt.long()))
                 else:
                     # TODO: Multi-scale mask camera
                     num_total_samples=mask_camera.sum()
                     loss_occ_i = (criterion(pred, gt.long(), mask_camera, avg_factor=num_total_samples) \
-                        + sem_scal_loss(pred, gt.long()) + geo_scal_loss(pred, gt.long()))
+                        + sem_scal_loss(pred, gt.long()))
                 
                 # focal weight
                 loss_occ_i = loss_occ_i * ((0.5)**(len(preds_dicts['occ_preds']) - 1 -i))

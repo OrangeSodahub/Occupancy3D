@@ -28,12 +28,14 @@ input_modality = dict(
     use_external=True)
 
 _dim_ = [128, 256, 512]
+_pos_dim_ = _dim_[0] // 2
 _ffn_dim_ = [256, 512, 1024]
 volume_h_ = [100, 50, 25]
 volume_w_ = [100, 50, 25]
 volume_z_ = [8, 4, 2]
 _num_points_ = [2, 4, 8]
 _num_layers_ = [1, 3, 6]
+queue_length = 4 # each sequence contains `queue_length` frames.
 
 model = dict(
     type='SurroundOcc',
@@ -65,6 +67,7 @@ model = dict(
         volume_w=volume_w_,
         volume_z=volume_z_,
         occ_size=occ_size,
+        pc_range=point_cloud_range,
         num_query=900,
         num_classes=18,
         conv_input=[_dim_[2], 256, _dim_[1], 128, _dim_[0], 64, 64],
@@ -95,15 +98,28 @@ model = dict(
                                 num_points=_num_points_,
                                 num_levels=1),
                             embed_dims=_dim_,
-                        )
+                        ),
+                        dict(
+                            type='TemporalSelfAttention',
+                            # TODO: verify, only use temporal attention
+                            # upon the last volume feature map
+                            embed_dims=_dim_[0]*volume_z_[0],
+                            num_levels=1
+                        ),
                     ],
                     feedforward_channels=_ffn_dim_,
                     ffn_dropout=0.1,
                     embed_dims=_dim_,
                     conv_num=2,
-                    operation_order=('cross_attn', 'norm',
+                    operation_order=('self_attn', 'norm', 'cross_attn', 'norm',
                                      'ffn', 'norm', 'conv')))),
-),
+        positional_encoding=dict(
+            type='LearnedPositionalEncoding',
+            num_feats=_pos_dim_,
+            row_num_embed=volume_h_[0],
+            col_num_embed=volume_w_[1],
+        ),
+    ),
 )
 
 dataset_type = 'CustomNuScenesOccDataset'
@@ -135,38 +151,37 @@ data = dict(
     samples_per_gpu=1,
     workers_per_gpu=4,
     train=dict(
-            type=dataset_type,
-            data_root=data_root,
-            ann_file='data/occ3d-nus/occ_infos_temporal_train.pkl',
-            pipeline=train_pipeline,
-            modality=input_modality,
-            test_mode=False,
-            use_valid_flag=True,
-            occ_size=occ_size,
-            pc_range=point_cloud_range,
-            use_semantic=use_semantic,
-            classes=class_names,
-            box_type_3d='LiDAR'),
+        type=dataset_type,
+        data_root=data_root,
+        ann_file='data/occ3d-nus/occ_infos_temporal_train.pkl',
+        pipeline=train_pipeline,
+        modality=input_modality,
+        test_mode=False,
+        use_valid_flag=True,
+        occ_size=occ_size,
+        pc_range=point_cloud_range,
+        use_semantic=use_semantic,
+        classes=class_names,
+        queue_length=queue_length,
+        box_type_3d='LiDAR'),
     val=dict(type=dataset_type,
-            data_root=data_root,
-            ann_file='data/occ3d-nus/occ_infos_temporal_val.pkl',
-            pipeline=test_pipeline,  
-            occ_size=occ_size,
-            pc_range=point_cloud_range,
-            use_semantic=use_semantic,
-            classes=class_names,
-            modality=input_modality,
-            eval_fscore=True),
+             data_root=data_root,
+             ann_file='data/occ3d-nus/occ_infos_temporal_val.pkl',
+             pipeline=test_pipeline,  
+             occ_size=occ_size,
+             pc_range=point_cloud_range,
+             use_semantic=use_semantic,
+             classes=class_names,
+             modality=input_modality),
     test=dict(type=dataset_type,
-            data_root=data_root,
-            ann_file='data/occ3d-nus/occ_infos_temporal_val.pkl',
-            pipeline=test_pipeline, 
-            occ_size=occ_size,
-            pc_range=point_cloud_range,
-            use_semantic=use_semantic,
-            classes=class_names,
-            modality=input_modality,
-            eval_fscore=True),
+              data_root=data_root,
+              ann_file='data/occ3d-nus/occ_infos_temporal_val.pkl',
+              pipeline=test_pipeline, 
+              occ_size=occ_size,
+              pc_range=point_cloud_range,
+              use_semantic=use_semantic,
+              classes=class_names,
+              modality=input_modality),
     shuffler_sampler=dict(type='DistributedGroupSampler'),
     nonshuffler_sampler=dict(type='DistributedSampler')
 )

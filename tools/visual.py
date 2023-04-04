@@ -42,7 +42,7 @@ def get_grid_coords(dims, resolution, ratio):
 
     xx, yy, zz = np.meshgrid(g_xx, g_yy, g_zz)
     index_grid = np.array([xx.flatten(), yy.flatten(), zz.flatten()]).T
-    index_grid = index_grid.astype(np.int32)
+    index_grid = index_grid.astype(np.int32) // ratio
 
     # Obtaining the coords_grid
     g_xx = np.arange(0, dims[0] // ratio) # [0, 1, ..., 199]
@@ -64,30 +64,20 @@ def draw(
     voxels,                         # semantic occupancy predictions
     mask_lidar,
     mask_camera,
-    voxel_origin=[-40, -40, -1],      # the original of the whole space
+    vox_origin=[-40, -40, -1],      # the original of the whole space
     voxel_size=[0.4, 0.4, 0.4],     # voxel size in the real world
     ratio=1,                        # scale
-    remove_free=False,
 ):
     h, w, z = voxels.shape
 
     # Compute the voxels coordinates
     grid_index, semantics_index, grid_coords = get_grid_coords([h, w, z], voxel_size, ratio)
+    semantics_index[grid_index[:, 0], grid_index[:, 1], grid_index[:, 2]] = \
+        voxels[grid_index[:, 0]*ratio, grid_index[:, 1]*ratio, grid_index[:, 2]*ratio]
+    grid_coords += np.array(vox_origin, dtype=np.float32).reshape([1, 3])
 
-    if remove_free:
-        voxels = np.vstack([grid_index.T, voxels.reshape(-1)]).T
-        voxels = voxels[voxels[:, 3] < 17]
-        grid_index = voxels[:, :3] // ratio
-        semantics_index = np.zeros([h // ratio, w // ratio, z // ratio])
-        semantics_index[grid_index[:, 0], grid_index[:, 1], grid_index[:, 2]] = voxels[:, 3]
-        grid_coords[:, :3] += np.array(voxel_origin, dtype=np.float32).reshape([1, 3])
-        grid_coords = np.vstack([grid_coords.T, semantics_index.reshape(-1)]).T
-    else:
-        semantics_index[grid_index[:, 0], grid_index[:, 1], grid_index[:, 2]] = \
-            voxels[grid_index[:, 0]*ratio, grid_index[:, 1]*ratio, grid_index[:, 2]*ratio]
-        grid_coords += np.array(voxel_origin, dtype=np.float32).reshape([1, 3])
-        # grid_coords: (H*W*Z, 4) with the real xyz and predicted label(0~17)
-        grid_coords = np.vstack([grid_coords.T, semantics_index.reshape(-1)]).T
+    # grid_coords: (H*W*Z, 4) with the real xyz and predicted label(0~17)
+    grid_coords = np.vstack([grid_coords.T, semantics_index.reshape(-1)]).T
 
     # Get the voxels inside FOV
     fov_grid_coords = grid_coords
@@ -95,7 +85,7 @@ def draw(
     # Remove empty and unknown voxels (label==0)
     fov_voxels = fov_grid_coords
     # TODO: mask in ratio != 1
-    if False:
+    if ratio == 1:
         fov_voxels = fov_grid_coords[
             (mask_camera.reshape(-1) == 1) & (mask_lidar.reshape(-1) == 1), :
         ]
@@ -140,4 +130,4 @@ if __name__ == '__main__':
     occ_path = './data/labels.npz'
     occ = np.load(open(occ_path, "rb"))
     ratio = 1
-    draw(occ['semantics'], occ['mask_lidar'], occ['mask_camera'], ratio=ratio, remove_free=True)
+    draw(occ['semantics'], occ['mask_lidar'], occ['mask_camera'], ratio=ratio)

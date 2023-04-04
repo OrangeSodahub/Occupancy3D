@@ -116,14 +116,8 @@ class Metric_mIoU():
         return round(np.nanmean(mIoUs) * 100, 2), hist
 
 
-    def add_batch(self, semantics_pred, semantics_gt, mask_lidar, mask_camera):
+    def add_batch(self,semantics_pred,semantics_gt,mask_lidar,mask_camera):
         self.cnt += 1
-
-        # unified dimension
-        semantics_gt = semantics_gt.transpose(1, 0, 2)
-        mask_lidar = mask_lidar.transpose(1, 0, 2)
-        mask_camera = mask_camera.transpose(1, 0, 2)
-
         if self.use_image_mask:
             masked_semantics_gt = semantics_gt[mask_camera]
             masked_semantics_pred = semantics_pred[mask_camera]
@@ -179,8 +173,6 @@ class Metric_FScore():
         self.tot_f1_mean = 0.
         self.eps = 1e-8
 
-
-
     def voxel2points(self, voxel):
         # occIdx = torch.where(torch.logical_and(voxel != FREE, voxel != NOT_OBSERVED))
         # if isinstance(voxel, np.ndarray): voxel = torch.from_numpy(voxel)
@@ -197,11 +189,6 @@ class Metric_FScore():
 
         # for scene_token in tqdm(preds_dict.keys()):
         self.cnt += 1
-
-        # unified dimension
-        semantics_gt = semantics_gt.transpose(1, 0, 2)
-        mask_lidar = mask_lidar.transpose(1, 0, 2)
-        mask_camera = mask_camera.transpose(1, 0, 2)
 
         if self.use_image_mask:
 
