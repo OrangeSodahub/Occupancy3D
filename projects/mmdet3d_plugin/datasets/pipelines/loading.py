@@ -35,16 +35,7 @@ class LoadOccupancy(object):
         mask_lidar = occ_labels['mask_lidar']
         mask_camera = occ_labels['mask_camera']
         
-        semantics = occ_labels['semantics'].astype(np.float32)
-        
-        # class 0 is 'ignore' class
-        if self.use_semantic:
-            semantics[..., 3][semantics[..., 3] == 0] = 255
-        else:
-            semantics = semantics[semantics[..., 3] > 0]
-            semantics[..., 3] = 1
-        
-        # results['gt_occ'] = semantics
+        # Here class 0 is not the ignore class
         results['voxel_semantics'] = semantics
         results['mask_lidar'] = mask_lidar
         results['mask_camera'] = mask_camera
