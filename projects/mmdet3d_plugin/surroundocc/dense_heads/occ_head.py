@@ -222,9 +222,6 @@ class OccHead(nn.Module):
         volume_embed = []
         # fpn_level=3 (embeding_dims=[128, 256, 512])
         for i in range(self.fpn_level):
-            # only for obtaining the prev_feat
-            if only_feat and i > 0:
-                break
 
             # `volume_embedding[i]: (in) h[i]*w[i]*z[i] (out) embeding_dim[i]``
             # `                [0]: (in) 80000 (out) 128`
