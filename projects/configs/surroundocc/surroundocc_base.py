@@ -36,7 +36,7 @@ volume_z_ = [8, 4, 2]
 _num_points_ = [2, 4, 8]
 _num_layers_ = [1, 3, 6]
 _num_levels_ = 3
-_num_featrue_levels = 4 # [0, 2, 4, 6]
+_num_featrue_levels_ = 4 # [0, 2, 4, 6]
 queue_length = 2 # each sequence contains `queue_length` frames.
 
 model = dict(
@@ -83,7 +83,7 @@ model = dict(
         transformer_template=dict(
             type='PerceptionTransformer',
             embed_dims=_dim_,
-            num_feature_levels=_num_featrue_levels,
+            num_feature_levels=_num_featrue_levels_,
             encoder=dict(
                 type='OccEncoder',
                 num_layers=_num_layers_,

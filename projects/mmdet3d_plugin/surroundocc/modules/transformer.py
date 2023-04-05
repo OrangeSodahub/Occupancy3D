@@ -107,7 +107,7 @@ class PerceptionTransformer(BaseModule):
         # TODO: verify, here pos_dim=128, only use volume_pos when C=128
         volume_queries = volume_queries.unsqueeze(1).repeat(1, bs, 1)
         if volume_pos is not None:
-            volume_pos = volume_pos.unsqueeze(4).repeat(1, 1, 1, 1, volume_z).flatten(2).permute(2, 0, 1)
+            volume_pos = volume_pos.flatten(2).permute(2, 0, 1)
 
         # obtain rotation angle and shift with ego motion
         delta_x = np.array([each['can_bus'][0]
