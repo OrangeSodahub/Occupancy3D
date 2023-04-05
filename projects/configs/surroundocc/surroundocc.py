@@ -35,7 +35,7 @@ volume_w_ = [100, 50, 25]
 volume_z_ = [8, 4, 2]
 _num_points_ = [2, 4, 8]
 _num_layers_ = [1, 3, 6]
-queue_length = 4 # each sequence contains `queue_length` frames.
+queue_length = 2 # each sequence contains `queue_length` frames.
 
 model = dict(
     type='SurroundOcc',
@@ -117,7 +117,7 @@ model = dict(
             type='LearnedPositionalEncoding',
             num_feats=_pos_dim_,
             row_num_embed=volume_h_[0],
-            col_num_embed=volume_w_[1],
+            col_num_embed=volume_w_[0],
         ),
     ),
 )

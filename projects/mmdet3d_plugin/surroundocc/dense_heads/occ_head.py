@@ -248,7 +248,7 @@ class OccHead(nn.Module):
             volume_z = self.volume_z[i]
 
             _, _, C, H, W = mlvl_feats[i].shape
-            # `transfer_conv` transform image feature map
+            # `transfer_conv` unify the feature dimension of image features of different size
             # `transfer_conv[0]: (in) 512 (out) 128`
             # `             [1]: (in) 512 (out) 256`
             # `             [2]: (in) 512 (out) 512`
@@ -263,7 +263,7 @@ class OccHead(nn.Module):
                 grid_length=((self.pc_range[3] - self.pc_range[0]) / self.occ_size[0],
                              (self.pc_range[4] - self.pc_range[1]) / self.occ_size[1],
                              (self.pc_range[5] - self.pc_range[2]) / self.occ_size[2],),
-                # TODO: verify this, only use temporal attention upon the last query
+                # TODO: verify this, only use temporal attention upon the first query
                 # the prev_feat corresponding the shape of (200, 200, 16)
                 volume_pos=volume_pos,
                 img_metas=img_metas,
@@ -271,11 +271,11 @@ class OccHead(nn.Module):
             )
             volume_embed.append(volume_embed_i)
         
-        # TODO
-        # return the embedding features (200, 200, 16)
-        # no predicts will generate
-        if only_feat:
-            return volume_embed[0]
+            # TODO: verify
+            # return the firsut embedding features of shape (200, 200, 16)
+            # no predicts will generate
+            if only_feat and i == 0:
+                return volume_embed_i
 
         volume_embed_reshape = []
         for i in range(self.fpn_level):

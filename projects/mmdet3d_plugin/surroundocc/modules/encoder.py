@@ -194,9 +194,9 @@ class OccEncoder(TransformerLayerSequence):
         reference_points_cam, volume_mask = self.point_sampling(
             ref_3d, self.pc_range, kwargs['img_metas'])
 
+        # Here need to align the pose
         shift_ref_2d = ref_2d.clone()
-        # TODO: shift
-        # shift_ref_2d += shift[:, None, None, :]
+        shift_ref_2d += shift[:, None, None, :]
 
         # (num_query, bs, embed_dims) -> (bs, num_query, embed_dims)
         volume_query = volume_query.permute(1, 0, 2)
@@ -210,7 +210,7 @@ class OccEncoder(TransformerLayerSequence):
                 [prev_feat, volume_query], 1).reshape(bs*2, len_bev, -1)
             hybird_ref_2d = torch.stack([shift_ref_2d, ref_2d], 1).reshape(
                 bs*2, len_bev, num_bev_level, 2)
-        else:
+        else: # if has no prev_feat, do self-atten with itself
             hybird_ref_2d = torch.stack([ref_2d, ref_2d], 1).reshape(
                 bs*2, len_bev, num_bev_level, 2)
 
@@ -393,7 +393,7 @@ class OccLayer(MyCustomBaseTransformerLayer):
                 query = self.norms[norm_index](query)
                 norm_index += 1
 
-            # temporal self attention
+            # TODO: temporal self attention
             # Only the first layer uses the temporal attention
             elif layer == 'self_attn':
                 bs, _, c = query.shape

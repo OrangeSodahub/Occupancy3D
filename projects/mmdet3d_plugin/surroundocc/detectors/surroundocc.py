@@ -67,7 +67,6 @@ class SurroundOcc(MVXTwoStageDetector):
                 img_metas = [each[i] for each in img_metas_list]
                 if not img_metas[0]['prev_feat_exists']:
                     prev_feat = None
-                # img_feats = self.extract_feat(img=img, img_metas=img_metas)
                 img_feats = [each_scale[:, i] for each_scale in img_feats_list]
                 prev_feat = self.pts_bbox_head(
                     img_feats, img_metas, prev_feat, only_feat=True)
@@ -163,7 +162,7 @@ class SurroundOcc(MVXTwoStageDetector):
                       mask_lidar=None,
                       mask_camera=None,
                       ):
-
+        # img: (bs, len_queue, N, C, H, W) 
         len_queue = img.size(1)
         prev_img = img[:, :-1, ...]
         img = img[:, -1, ...]

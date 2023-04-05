@@ -43,7 +43,10 @@ class PerceptionTransformer(BaseModule):
                  use_shift=True,
                  use_cams_embeds=True,
                  rotate_prev_feat=True,
-                 rotate_center=[100, 100],
+                 # Here we only use prev_feat upon the first layer
+                 # whose feature map shape is (100, 100, 8)
+                 # so the center is (50, 50), not (100, 100)
+                 rotate_center=[50, 50],
                  **kwargs):
         super(PerceptionTransformer, self).__init__(**kwargs)
 
@@ -128,7 +131,7 @@ class PerceptionTransformer(BaseModule):
             [shift_x, shift_y]).permute(1, 0)  # xy, bs -> bs, xy
 
         if prev_feat is not None:
-
+            # pref_feat: (bs, num_prev_feat, c)
             if prev_feat.shape[1] == volume_h * volume_w * volume_z:
                 prev_feat = prev_feat.permute(1, 0, 2)
             elif len(prev_feat.shape) == 4:
@@ -136,7 +139,10 @@ class PerceptionTransformer(BaseModule):
 
             if self.rotate_prev_feat:
                 for i in range(bs):
-                    # num_prev_bev = prev_bev.size(1)
+                    # num_prev_feat = prev_feat.size(1) = h*w*z
+                    # `rotation_angle` is the difference of angle between
+                    # the current frame and the previous frame
+                    # Here need to align the angle
                     rotation_angle = kwargs['img_metas'][i]['can_bus'][-1]
                     tmp_prev_feat = prev_feat[:, i].reshape(
                         volume_h, volume_w, -1).permute(2, 0, 1)

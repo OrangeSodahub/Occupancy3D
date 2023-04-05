@@ -75,10 +75,13 @@ class CustomNuScenesOccDataset(NuScenesDataset):
                 metas_map[i]['prev_feat_exists'] = True
                 tmp_pos = copy.deepcopy(metas_map[i]['can_bus'][:3])
                 tmp_angle = copy.deepcopy(metas_map[i]['can_bus'][-1])
+                # Calculate the diff of pose/angle between current and previous frame
                 metas_map[i]['can_bus'][:3] -= prev_pos
                 metas_map[i]['can_bus'][-1] -= prev_angle
                 prev_pos = copy.deepcopy(tmp_pos)
                 prev_angle = copy.deepcopy(tmp_angle)
+        # data fed into surroundocc.forward(), `img_metas`==`metas_map`
+        # kwargs: dict_keys(['img_metas', 'img', 'volume_semantics', 'mask_lidar', 'mask_camera])
         queue[-1]['img'] = DC(torch.stack(imgs_list), cpu_only=False, stack=True)
         queue[-1]['img_metas'] = DC(metas_map, cpu_only=True)
         queue = queue[-1]
@@ -125,11 +128,6 @@ class CustomNuScenesOccDataset(NuScenesDataset):
                                      inverse=True)
         input_dict['ego2lidar'] = ego2lidar
 
-        lidar2ego_rotation = info['lidar2ego_rotation']
-        lidar2ego_translation = info['lidar2ego_translation']
-        ego2lidar = transform_matrix(translation=lidar2ego_translation, rotation=Quaternion(lidar2ego_rotation),
-                                     inverse=True)
-        input_dict['ego2lidar'] = ego2lidar
         if self.modality['use_camera']:
             image_paths = []
             lidar2img_rts = []
