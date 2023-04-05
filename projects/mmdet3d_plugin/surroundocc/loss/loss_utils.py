@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pdb
 
-def multiscale_supervision(voxel_semantics, ratio, gt_shape, original_shape):
+def multiscale_supervision(voxel_semantics, ratio, gt_shape, original_coords):
     '''
     change ground truth shape as (B, W, H, Z) for each level supervision
     '''
@@ -11,12 +11,20 @@ def multiscale_supervision(voxel_semantics, ratio, gt_shape, original_shape):
     # `gt_shape: (bs, num_classes, W, H, Z)`
     # `gt: (bs, W, H, Z)`
     gt = torch.zeros([gt_shape[0], gt_shape[2], gt_shape[3], gt_shape[4]]).to(voxel_semantics.device).type(torch.float) 
+    # TODO: verify, 0 or 17?
+    # In the dataset provided by CVPR2023 challenge, all the voxels
+    # which has no labels (0-16) are labeled as 17 (free or empty)
+    gt += 17
     for i in range(gt.shape[0]):
         # Roughly calculate the downsampled label
-        # TODO: verify
-        coords = torch.div(original_shape.long(), ratio, rounding_mode='floor')
-        gt[i, coords[:, 0], coords[:, 1], coords[:, 2]] =  voxel_semantics[i, coords[:, 0]*ratio, coords[:, 1]*ratio, coords[:, 2]*ratio]
-    
+        # TODO: verify, remove free
+        original_coords = original_coords.to(voxel_semantics.device)
+        voxel_semantics_with_coords = torch.vstack([original_coords.T, voxel_semantics[i].reshape(-1)]).T
+        voxel_semantics_with_coords = voxel_semantics_with_coords[voxel_semantics_with_coords[:, 3] < 17]
+        downsampled_coords = torch.div(voxel_semantics_with_coords[:, :3].long(), ratio, rounding_mode='floor')
+        gt[i, downsampled_coords[:, 0], downsampled_coords[:, 1], downsampled_coords[:, 2]] = \
+                                                                            voxel_semantics_with_coords[:, 3]
+
     return gt
 
 def geo_scal_loss(pred, ssc_target, semantic=True):
@@ -26,14 +34,14 @@ def geo_scal_loss(pred, ssc_target, semantic=True):
         pred = F.softmax(pred, dim=1)
 
         # Compute empty and nonempty probabilities
-        empty_probs = pred[:, 0, :, :, :]
+        empty_probs = pred[:, 17, :, :, :]
     else:
         empty_probs = 1 - torch.sigmoid(pred)
     nonempty_probs = 1 - empty_probs
 
     # Remove unknown voxels
     mask = ssc_target != 255
-    nonempty_target = ssc_target != 0
+    nonempty_target = ssc_target != 17
     nonempty_target = nonempty_target[mask].float()
     nonempty_probs = nonempty_probs[mask]
     empty_probs = empty_probs[mask]

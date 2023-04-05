@@ -125,6 +125,11 @@ class CustomNuScenesOccDataset(NuScenesDataset):
                                      inverse=True)
         input_dict['ego2lidar'] = ego2lidar
 
+        lidar2ego_rotation = info['lidar2ego_rotation']
+        lidar2ego_translation = info['lidar2ego_translation']
+        ego2lidar = transform_matrix(translation=lidar2ego_translation, rotation=Quaternion(lidar2ego_rotation),
+                                     inverse=True)
+        input_dict['ego2lidar'] = ego2lidar
         if self.modality['use_camera']:
             image_paths = []
             lidar2img_rts = []

@@ -116,8 +116,14 @@ class Metric_mIoU():
         return round(np.nanmean(mIoUs) * 100, 2), hist
 
 
-    def add_batch(self,semantics_pred,semantics_gt,mask_lidar,mask_camera):
+    def add_batch(self, semantics_pred, semantics_gt, mask_lidar, mask_camera):
         self.cnt += 1
+
+        # unified dimension
+        semantics_gt = semantics_gt.transpose(1, 0, 2)
+        mask_lidar = mask_lidar.transpose(1, 0, 2)
+        mask_camera = mask_camera.transpose(1, 0, 2)
+
         if self.use_image_mask:
             masked_semantics_gt = semantics_gt[mask_camera]
             masked_semantics_pred = semantics_pred[mask_camera]
@@ -189,6 +195,11 @@ class Metric_FScore():
 
         # for scene_token in tqdm(preds_dict.keys()):
         self.cnt += 1
+
+        # unified dimension
+        semantics_gt = semantics_gt.transpose(1, 0, 2)
+        mask_lidar = mask_lidar.transpose(1, 0, 2)
+        mask_camera = mask_camera.transpose(1, 0, 2)
 
         if self.use_image_mask:
 

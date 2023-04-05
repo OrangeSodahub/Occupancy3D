@@ -348,18 +348,16 @@ class OccHead(nn.Module):
                 # `voxel_semantics` has the highest resolution
                 # Here we downsample the `voxel_semantics` to generate low level resolution labels
                 gt = multiscale_supervision(voxel_semantics.clone(), ratio, preds_dicts['occ_preds'][i].shape, self.coords_grid)
-
-                # Transform `gt` from (bs, H, W, Z) to (bs, W, H, Z)
-                # `pred: (bs, num_classes, W, H, Z)`
+                # align with the pred
                 gt = gt.permute(0, 2, 1, 3)
-                # TODO: geo_scal_loss()
+                
                 if not self.use_mask:
-                    loss_occ_i = (criterion(pred, gt.long()) + sem_scal_loss(pred, gt.long()))
+                    loss_occ_i = (criterion(pred, gt.long()) + sem_scal_loss(pred, gt.long()) + geo_scal_loss(pred, gt.long()))
                 else:
                     # TODO: Multi-scale mask camera
                     num_total_samples=mask_camera.sum()
                     loss_occ_i = (criterion(pred, gt.long(), mask_camera, avg_factor=num_total_samples) \
-                        + sem_scal_loss(pred, gt.long()))
+                        + sem_scal_loss(pred, gt.long()) + geo_scal_loss(pred, gt.long()))
                 
                 # focal weight
                 loss_occ_i = loss_occ_i * ((0.5)**(len(preds_dicts['occ_preds']) - 1 -i))
