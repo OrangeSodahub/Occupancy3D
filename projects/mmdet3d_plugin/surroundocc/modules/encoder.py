@@ -109,6 +109,7 @@ class OccEncoder(TransformerLayerSequence):
         reference_points[..., 2:3] = reference_points[..., 2:3] * \
             (pc_range[5] - pc_range[2]) + pc_range[2]
 
+        # transform to homogeneous coords
         reference_points = torch.cat(
             (reference_points, torch.ones_like(reference_points[..., :1])), -1)
 
@@ -129,13 +130,18 @@ class OccEncoder(TransformerLayerSequence):
                                     reference_points.to(torch.float32)).squeeze(-1)
         eps = 1e-5
 
+        # After transforming the reference points from the ego coords to the image coords
+        # We get pixel coords of (u, v, 0, 1), the distance from the points to the image
+        # plane should be zero therotically, or it doesn't belong to the image plane
         volume_mask = (reference_points_cam[..., 2:3] > eps)
         reference_points_cam = reference_points_cam[..., 0:2] / torch.maximum(
             reference_points_cam[..., 2:3], torch.ones_like(reference_points_cam[..., 2:3]) * eps)
 
+        # pixel coords (u, v) responds to image shape (h, w)
         reference_points_cam[..., 0] /= img_metas[0]['img_shape'][0][1]
         reference_points_cam[..., 1] /= img_metas[0]['img_shape'][0][0]
 
+        # Besides, the points which locate outside the image shape (h, w) should be removed
         volume_mask = (volume_mask & (reference_points_cam[..., 1:2] > 0.0)
                     & (reference_points_cam[..., 1:2] < 1.0)
                     & (reference_points_cam[..., 0:1] < 1.0)
