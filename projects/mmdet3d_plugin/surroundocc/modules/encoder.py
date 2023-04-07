@@ -1,30 +1,19 @@
-
-# ---------------------------------------------
-# Copyright (c) OpenMMLab. All rights reserved.
-# ---------------------------------------------
-#  Modified by Zhiqi Li
-# ---------------------------------------------
-
-from projects.mmdet3d_plugin.models.utils.bricks import run_time
-from projects.mmdet3d_plugin.models.utils.visual import save_tensor
-from .custom_base_transformer_layer import MyCustomBaseTransformerLayer
+from __future__ import absolute_import, division, print_function
 import copy
 import warnings
+import torch
+import torch.nn as nn
+import numpy as np
+
 from mmcv.cnn.bricks.registry import (ATTENTION,
                                       TRANSFORMER_LAYER,
                                       TRANSFORMER_LAYER_SEQUENCE)
-from mmcv.cnn.bricks.transformer import TransformerLayerSequence
-from mmcv.runner import force_fp32, auto_fp16
-import numpy as np
-import torch
-import cv2 as cv
-import mmcv
-from mmcv.utils import TORCH_VERSION, digit_version
 from mmcv.utils import ext_loader
-import pdb
-import torch.nn.functional as F
-import torch.nn as nn
-from mmcv.cnn import build_conv_layer, build_norm_layer, build_upsample_layer
+from mmcv.utils import TORCH_VERSION, digit_version
+from mmcv.cnn import build_conv_layer, build_norm_layer
+from mmcv.runner import force_fp32, auto_fp16
+from mmcv.cnn.bricks.transformer import TransformerLayerSequence
+from .custom_base_transformer_layer import MyCustomBaseTransformerLayer
 ext_module = ext_loader.load_ext(
     '_ext', ['ms_deform_attn_backward', 'ms_deform_attn_forward'])
 
