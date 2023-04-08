@@ -1,7 +1,7 @@
 # ---------------------------------------------
 # Copyright (c) OpenMMLab. All rights reserved.
 # ---------------------------------------------
-#  Modified by Zhiqi Li
+#  Modified by Xiaoyu Tian
 # ---------------------------------------------
 import mmcv
 import numpy as np
@@ -225,7 +225,6 @@ def _fill_trainval_infos(nusc,
             'ego2global_translation': pose_record['translation'],
             'ego2global_rotation': pose_record['rotation'],
             'timestamp': sample['timestamp'],
-            'lidar_token': lidar_token,
         }
 
         if sample['next'] == '':

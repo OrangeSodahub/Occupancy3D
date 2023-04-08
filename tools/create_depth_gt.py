@@ -1,4 +1,5 @@
 import os
+from tqdm import tqdm
 from multiprocessing import Pool
 
 import mmcv
@@ -73,6 +74,7 @@ def map_pointcloud_to_image(
 version = 'v1.0-trainval'
 data_root = 'data/nuScenes'
 info_path = 'data/occ3d-nus/occ_infos_temporal_train.pkl'
+save_root = 'data'
 
 lidar_key = 'LIDAR_TOP'
 cam_keys = [
@@ -81,49 +83,45 @@ cam_keys = [
 
 
 def worker(info):
-    nusc = NuScenes(version=version, dataroot=data_root, verbose=True)
-    lidar_token = info['lidar_token']
-    lidar_data = nusc.get('sample_data', lidar_token)
     lidar_path = info['lidar_path']
-
-    points = np.fromfile(os.path.join(data_root, lidar_path),
-                         dtype=np.float32,
-                         count=-1).reshape(-1, 5)[..., :4]
-    lidar_calibrated_sensor = nusc.get(
-                'calibrated_sensor', lidar_data['calibrated_sensor_token'])
-    lidar_ego_pose = nusc.get('ego_pose', lidar_data['ego_pose_token'])
+    points = np.fromfile(lidar_path, dtype=np.float32, count=-1).reshape(-1, 5)[..., :4]
+    lidar_calibrated_sensor = {
+        'translation': info['lidar2ego_translation'],
+        'rotation': info['lidar2ego_rotation'],
+    }
+    lidar_ego_pose = {
+        'translation': info['ego2global_translation'],
+        'rotation': info['ego2global_rotation']
+    }
     for _, cam_key in enumerate(cam_keys):
         cam_calibrated_sensor = {
             'translation': info['cams'][cam_key]['sensor2ego_translation'],
             'rotation': info['cams'][cam_key]['sensor2ego_rotation'],
-            'intrinsic': info['cams'][cam_key]['cam_intrinsic'],
+            'camera_intrinsic': info['cams'][cam_key]['cam_intrinsic'],
         }
         cam_ego_pose = {
             'translation': info['cams'][cam_key]['ego2global_translation'],
             'rotation': info['cams'][cam_key]['ego2global_rotation']
         }
-        img = mmcv.imread(
-            os.path.join(data_root, info['cams'][cam_key]['data_path']))
+        img = mmcv.imread(info['cams'][cam_key]['data_path'])
         pts_img, depth = map_pointcloud_to_image(
             points.copy(), img, lidar_calibrated_sensor.copy(),
             lidar_ego_pose.copy(), cam_calibrated_sensor, cam_ego_pose)
         file_name = os.path.split(info['cams'][cam_key]['data_path'])[-1]
-        save_path = os.path.join(data_root, 'depth_gt', f'{file_name}.bin')
+        save_path = os.path.join(save_root, 'depth_gt', f'{file_name}.bin')
         np.concatenate([pts_img[:2, :].T, depth[:, None]], axis=1
                         ).astype(np.float32).flatten().tofile(save_path)
-        info['cams'][cam_key]['depth_gt_path'] = f'{file_name}.bin'
+        return save_path
 
 
 if __name__ == '__main__':
-    po = Pool(24)
-    mmcv.mkdir_or_exist(os.path.join(data_root, 'depth_gt'))
+    mmcv.mkdir_or_exist(os.path.join(save_root, 'depth_gt'))
 
     # Here we add depth gt information to existing pkl files
+    # Need to create symbolic in /occ3d-nus/samples/LIDAR_TOP
     infos = mmcv.load(info_path)
-    # import ipdb; ipdb.set_trace()
-    for info in infos:
-        po.apply_async(func=worker, args=(info, ))
-    po.close()
-    po.join()
+    for info in tqdm(infos['infos']):
+        depth_gt_path = worker(info)
+        info.update(depth_gt_path=depth_gt_path)
 
     mmcv.dump(infos, info_path)

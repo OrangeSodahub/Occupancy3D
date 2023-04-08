@@ -1,7 +1,7 @@
 # ---------------------------------------------
 # Copyright (c) OpenMMLab. All rights reserved.
 # ---------------------------------------------
-#  Modified by Zhiqi Li
+#  Modified by Xiaoyu Tian
 # ---------------------------------------------
 import mmcv
 import numpy as np
@@ -16,6 +16,7 @@ from typing import List, Tuple, Union
 
 from mmdet3d.core.bbox.box_np_ops import points_cam2img
 from mmdet3d.datasets import NuScenesDataset
+import simplejson as json
 
 nus_categories = ('car', 'truck', 'trailer', 'bus', 'construction_vehicle',
                   'bicycle', 'motorcycle', 'pedestrian', 'traffic_cone',
@@ -27,7 +28,8 @@ nus_attributes = ('cycle.with_rider', 'cycle.without_rider',
                   'vehicle.parked', 'vehicle.stopped', 'None')
 
 
-def create_nuscenes_infos(root_path,
+def create_nuscenes_occ_infos(root_path,
+                          occ_path,
                           out_path,
                           can_bus_root_path,
                           info_prefix,
@@ -45,14 +47,20 @@ def create_nuscenes_infos(root_path,
         max_sweeps (int): Max number of sweeps.
             Default: 10
     """
+
     from nuscenes.nuscenes import NuScenes
     from nuscenes.can_bus.can_bus_api import NuScenesCanBus
     print(version, root_path)
     nusc = NuScenes(version=version, dataroot=root_path, verbose=True)
     nusc_can_bus = NuScenesCanBus(dataroot=can_bus_root_path)
+    print(type(nusc_can_bus))
     from nuscenes.utils import splits
     available_vers = ['v1.0-trainval', 'v1.0-test', 'v1.0-mini']
     assert version in available_vers
+
+    with open(os.path.join(occ_path,'annotations.json'),'r') as f:
+        occ_anno = json.load(f)
+
     if version == 'v1.0-trainval':
         train_scenes = splits.train
         val_scenes = splits.val
@@ -65,10 +73,6 @@ def create_nuscenes_infos(root_path,
     else:
         raise ValueError('unknown')
 
-    if version == 'v1.0-trainval':
-        assert len(val_scenes) == 150
-        train_scenes = val_scenes[:120]
-        val_scenes = val_scenes[120:]
     # filter existing scenes.
     available_scenes = get_available_scenes(nusc)
     available_scene_names = [s['name'] for s in available_scenes]
@@ -83,6 +87,10 @@ def create_nuscenes_infos(root_path,
         available_scenes[available_scene_names.index(s)]['token']
         for s in val_scenes
     ])
+    token2name = dict()
+    for scene in nusc.scene:
+        token2name[scene['token']]=scene['name']
+
 
     test = 'test' in version
     if test:
@@ -91,8 +99,8 @@ def create_nuscenes_infos(root_path,
         print('train scene: {}, val scene: {}'.format(
             len(train_scenes), len(val_scenes)))
 
-    train_nusc_infos, val_nusc_infos = _fill_trainval_infos(
-        nusc, nusc_can_bus, train_scenes, val_scenes, test, max_sweeps=max_sweeps)
+    train_nusc_infos, val_nusc_infos = _fill_occ_trainval_infos(
+        nusc,occ_anno,token2name, nusc_can_bus, train_scenes, val_scenes, test, max_sweeps=max_sweeps)
 
     metadata = dict(version=version)
     if test:
@@ -180,7 +188,9 @@ def _get_can_bus_info(nusc, nusc_can_bus, sample):
     return np.array(can_bus)
 
 
-def _fill_trainval_infos(nusc,
+def _fill_occ_trainval_infos(nusc,
+                         occ_anno,
+                         token2name,
                          nusc_can_bus,
                          train_scenes,
                          val_scenes,
@@ -203,20 +213,28 @@ def _fill_trainval_infos(nusc,
     train_nusc_infos = []
     val_nusc_infos = []
     frame_idx = 0
+    scene_infos=occ_anno['scene_infos']
+
     for sample in mmcv.track_iter_progress(nusc.sample):
-        if sample['scene_token'] not in train_scenes and sample['scene_token'] not in val_scenes:
-            continue
 
         lidar_token = sample['data']['LIDAR_TOP']
         sd_rec = nusc.get('sample_data', sample['data']['LIDAR_TOP'])
+
+        scene_token = sample['scene_token']
+        scene_name = token2name[scene_token]
+        sample_token=sd_rec['sample_token']
+        if sample_token in scene_infos[scene_name].keys():
+            occ_sample=scene_infos[scene_name][sample_token]
+        else:
+            continue
+
         cs_record = nusc.get('calibrated_sensor',
                              sd_rec['calibrated_sensor_token'])
         pose_record = nusc.get('ego_pose', sd_rec['ego_pose_token'])
         lidar_path, boxes, _ = nusc.get_sample_data(lidar_token)
 
-        mmcv.check_file_exist(lidar_path)
         can_bus = _get_can_bus_info(nusc, nusc_can_bus, sample)
-        ##
+
         info = {
             'lidar_path': lidar_path,
             'token': sample['token'],
@@ -232,9 +250,8 @@ def _fill_trainval_infos(nusc,
             'ego2global_translation': pose_record['translation'],
             'ego2global_rotation': pose_record['rotation'],
             'timestamp': sample['timestamp'],
-            'lidar_token': lidar_token,
         }
-
+        info['occ_gt_path'] = occ_sample['gt_path']
         if sample['next'] == '':
             frame_idx = 0
         else:
