@@ -52,8 +52,6 @@ class SurroundOcc(MVXTwoStageDetector):
         self.use_semantic = use_semantic
         self.is_vis = is_vis
                   
-
-
     def extract_img_feat(self, img, img_metas, len_queue=None):
         """Extract features of images."""
         B = img.size(0)
@@ -96,19 +94,29 @@ class SurroundOcc(MVXTwoStageDetector):
         
         return img_feats
 
-
     def forward_pts_train(self,
                           pts_feats,
                           voxel_semantics,
                           mask_camera,
+                          depth_gt,
                           img_metas):
+        losses = dict()
 
-        outs = self.pts_bbox_head(
-            pts_feats, img_metas)
+        # predict depth map
+        # TODO: for now only support single frame
+        depth_pred = self.pts_backbone(pts_feats)
+        # TODO: fix loss
+        losses_depth = self.pts_backbone.loss(depth_pred, depth_gt)
+        losses.update(losses_depth)
+
+        # predict occ volume
         # `voxel_semantics` only used in loss calculation
         # with multi-scale supervision
-        loss_inputs = [voxel_semantics, mask_camera, outs]
-        losses = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
+        occ_pred = self.pts_bbox_head(pts_feats, img_metas)
+        loss_inputs = [voxel_semantics, mask_camera, occ_pred]
+        losses_occ = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
+
+        losses.update(losses_occ)
         return losses
 
     def forward_dummy(self, img):
@@ -132,7 +140,6 @@ class SurroundOcc(MVXTwoStageDetector):
         else:
             return self.forward_test(**kwargs)
     
-
     @auto_fp16(apply_to=('img', 'points'))
     def forward_train(self,
                       img_metas=None,
@@ -140,12 +147,15 @@ class SurroundOcc(MVXTwoStageDetector):
                       voxel_semantics=None,
                       mask_lidar=None,
                       mask_camera=None,
+                      depth_gt=None,
                       ):
 
+        # extract image features
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
+
         losses = dict()
         losses_pts = self.forward_pts_train(img_feats, voxel_semantics, mask_camera,
-                                             img_metas)
+                                            depth_gt, img_metas)
 
         losses.update(losses_pts)
         return losses

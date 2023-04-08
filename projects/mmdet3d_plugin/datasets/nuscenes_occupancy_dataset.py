@@ -71,6 +71,7 @@ class CustomNuScenesOccDataset(NuScenesDataset):
         # standard protocal modified from SECOND.Pytorch
         input_dict = dict(
             occ_path = info['occ_gt_path'],
+            depth_path = info['depth_gt_path'],
             occ_size = np.array(self.occ_size),
             pc_range = np.array(self.pc_range)
         )

@@ -1,12 +1,7 @@
 #import open3d as o3d
-import mmcv
-import numpy as np
-
-from mmdet3d.core.points import BasePoints, get_points_type
-from mmdet.datasets.builder import PIPELINES
-from mmdet.datasets.pipelines import LoadAnnotations, LoadImageFromFile
-import random
 import os
+import numpy as np
+from mmdet.datasets.builder import PIPELINES
 
 
 @PIPELINES.register_module()
@@ -47,3 +42,26 @@ class LoadOccupancy(object):
         repr_str = self.__class__.__name__
         return repr_str
 
+
+@PIPELINES.register_module()
+class LoadDepthGT(object):
+    """Load depth groundtruth.
+
+    """
+
+    def __init__(self, data_root):
+        self.data_root = data_root
+    
+    def __call__(self, results):
+        depth_gt_path = results['depth_path']
+        depth_gt_path = os.path.join(self.data_root, depth_gt_path)
+        depth_gt = np.load(depth_gt_path)
+
+        results['depth_gt'] = depth_gt
+
+        return results
+
+    def __repr__(self):
+        """str: Return a string that describes the module."""
+        repr_str = self.__class__.__name__
+        return repr_str
