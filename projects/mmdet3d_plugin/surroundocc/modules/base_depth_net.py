@@ -1,14 +1,16 @@
 # Copyright (c) Megvii Inc. All rights reserved.
 import torch
+import numpy as np
 from torch import nn
 import torch.nn.functional as F
 from torch.cuda.amp.autocast_mode import autocast
 
-from mmdet.models import BACKBONES
+from mmdet3d.models.builder import BACKBONES
 from mmcv.cnn import build_conv_layer
 from mmdet3d.models import build_neck
 from mmdet.models import build_backbone
 from mmdet.models.backbones.resnet import BasicBlock
+from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import depth_loss
 
 
 __all__ = ['BaseLSSFPN']
@@ -163,93 +165,63 @@ class SELayer(nn.Module):
 
 
 class DepthNet(nn.Module):
-
-    def __init__(self, in_channels, mid_channels, context_channels,
-                 depth_channels):
+    def __init__(
+        self,
+        in_channels,
+        mid_channels,
+        context_channels,
+        depth_channels,
+        infer_mode=False,
+    ):
         super(DepthNet, self).__init__()
         self.reduce_conv = nn.Sequential(
-            nn.Conv2d(in_channels,
-                      mid_channels,
-                      kernel_size=3,
-                      stride=1,
-                      padding=1),
+            nn.Conv2d(in_channels, mid_channels, kernel_size=3, stride=1, padding=1),
             nn.BatchNorm2d(mid_channels),
             nn.ReLU(inplace=True),
         )
-        self.context_conv = nn.Conv2d(mid_channels,
-                                      context_channels,
-                                      kernel_size=1,
-                                      stride=1,
-                                      padding=0)
-        self.bn = nn.BatchNorm1d(27)
-        self.depth_mlp = Mlp(27, mid_channels, mid_channels)
-        self.depth_se = SELayer(mid_channels)  # NOTE: add camera-aware
-        self.context_mlp = Mlp(27, mid_channels, mid_channels)
-        self.context_se = SELayer(mid_channels)  # NOTE: add camera-aware
+        self.mlp = Mlp(1, mid_channels, mid_channels)
+        self.se = SELayer(mid_channels)  # NOTE: add camera-aware
         self.depth_conv = nn.Sequential(
             BasicBlock(mid_channels, mid_channels),
             BasicBlock(mid_channels, mid_channels),
             BasicBlock(mid_channels, mid_channels),
-            ASPP(mid_channels, mid_channels),
-            build_conv_layer(cfg=dict(
-                type='DCN',
-                in_channels=mid_channels,
-                out_channels=mid_channels,
-                kernel_size=3,
-                padding=1,
-                groups=4,
-                im2col_step=128,
-            )),
-            nn.Conv2d(mid_channels,
-                      depth_channels,
-                      kernel_size=1,
-                      stride=1,
-                      padding=0),
         )
+        # self.aspp = ASPP(mid_channels, mid_channels, BatchNorm=nn.InstanceNorm2d)
 
-    def forward(self, x, mats_dict):
-        intrins = mats_dict['intrin_mats'][:, 0:1, ..., :3, :3]
-        batch_size = intrins.shape[0]
-        num_cams = intrins.shape[2]
-        ida = mats_dict['ida_mats'][:, 0:1, ...]
-        sensor2ego = mats_dict['sensor2ego_mats'][:, 0:1, ..., :3, :]
-        bda = mats_dict['bda_mat'].view(batch_size, 1, 1, 4,
-                                        4).repeat(1, 1, num_cams, 1, 1)
-        mlp_input = torch.cat(
-            [
-                torch.stack(
-                    [
-                        intrins[:, 0:1, ..., 0, 0],
-                        intrins[:, 0:1, ..., 1, 1],
-                        intrins[:, 0:1, ..., 0, 2],
-                        intrins[:, 0:1, ..., 1, 2],
-                        ida[:, 0:1, ..., 0, 0],
-                        ida[:, 0:1, ..., 0, 1],
-                        ida[:, 0:1, ..., 0, 3],
-                        ida[:, 0:1, ..., 1, 0],
-                        ida[:, 0:1, ..., 1, 1],
-                        ida[:, 0:1, ..., 1, 3],
-                        bda[:, 0:1, ..., 0, 0],
-                        bda[:, 0:1, ..., 0, 1],
-                        bda[:, 0:1, ..., 1, 0],
-                        bda[:, 0:1, ..., 1, 1],
-                        bda[:, 0:1, ..., 2, 2],
-                    ],
-                    dim=-1,
-                ),
-                sensor2ego.view(batch_size, 1, num_cams, -1),
-            ],
-            -1,
+        self.depth_pred = nn.Conv2d(
+            mid_channels, depth_channels, kernel_size=1, stride=1, padding=0
         )
-        mlp_input = self.bn(mlp_input.reshape(-1, mlp_input.shape[-1]))
+        self.infer_mode = infer_mode
+
+    def forward(
+        self,
+        x=None,
+        intrins=None,
+        scale_depth_factor=1000.0,
+    ):
+        """
+            x: img_feat of shape (bs*n, c, h, w)    
+            intrins: camera intrinsics of shape (bs, 6, 4, 4)
+        """
+    
+        # TODO: fix scaled_pixel_size in infer mode
+        inv_intrins = torch.inverse(intrins)
+        # pixel_size of shape (bs, 6)
+        pixel_size = torch.norm(
+            # stack shape (bs, 6, 2)
+            torch.stack(
+                [inv_intrins[..., 0, 0], inv_intrins[..., 1, 1]], dim=-1
+            ),
+            dim=-1,
+        ).reshape(-1, 1).float().to(x.device)
+        scaled_pixel_size = pixel_size * scale_depth_factor
+
         x = self.reduce_conv(x)
-        context_se = self.context_mlp(mlp_input)[..., None, None]
-        context = self.context_se(x, context_se)
-        context = self.context_conv(context)
-        depth_se = self.depth_mlp(mlp_input)[..., None, None]
-        depth = self.depth_se(x, depth_se)
-        depth = self.depth_conv(depth)
-        return torch.cat([depth, context], dim=1)
+        x_se = self.mlp(scaled_pixel_size)[..., None, None]
+        x = self.se(x, x_se)
+        x = self.depth_conv(x)
+        depth = self.depth_pred(x)
+        return depth
 
 
 class DepthAggregation(nn.Module):
@@ -321,6 +293,9 @@ class BaseDepthNet(nn.Module):
         """
         super(BaseDepthNet, self).__init__()
         self.output_channels = output_channels
+        # TODO: fix self.depth_channels
+        # max/default is 64
+        self.depth_channels = 64
         self.depth_net = DepthNet(
             depth_net_conf['in_channels'],
             depth_net_conf['mid_channels'],
@@ -332,10 +307,40 @@ class BaseDepthNet(nn.Module):
             self.depth_aggregation_net = DepthAggregation(self.output_channels, self.output_channels,
                                 self.output_channels)
 
-    def forward(self, img_feats):
-
-        depth_feature = self.depth_net(img_feats)
-        depth = depth_feature[:, :self.depth_channels].softmax(
+    def forward(self, img_feats, img_metas, is_training=False):
+        # img_neck outputs 3 feature layers
+        # here only select the first one with
+        # shape of (bs, n, c, h, w)=(1, 6, 512, 116, 200)
+        img_feat = img_feats[0]
+        bs, n, c, h, w = img_feat.shape
+        img_feat = img_feat.reshape(bs*n, c, h, w)
+        # list[ndarray]: shape (6, 4, 4)
+        cam_intrinsic = img_metas[0]['cam_intrinsic']
+        intrinsics_mat = torch.from_numpy(np.array(cam_intrinsic))
+        intrinsics_mat = intrinsics_mat[None].repeat(bs, 1, 1, 1)
+        
+        # get depth prediction
+        # depth_feature of shape (bs*n, 64, h, w)=(6, 64, 116, 200)
+        depth_feature = self.depth_net(img_feat, intrinsics_mat)
+        depth_pred = depth_feature[:, :self.depth_channels].softmax(
             dim=1, dtype=depth_feature.dtype)
         
-        return depth
+        # TODO
+        img_feats_with_depth = img_feats
+        
+        if is_training:
+            return img_feats_with_depth, depth_pred
+        return img_feats_with_depth
+
+    def loss(self, depth_pred, depth_gt):
+        """depth loss
+            depth_pred: shape (bs*n, 64, h, w)
+            depth_gt: shape (m*3,)
+        """
+        depth_gt = depth_gt.reshape(-1, 3)
+        losses = dict()
+        loss = depth_loss(depth_pred, depth_gt)
+        
+        losses['depth_loss'] = loss
+
+        return losses

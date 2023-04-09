@@ -103,3 +103,6 @@ def sem_scal_loss(pred, ssc_target):
             loss += loss_class
     return loss / count
 
+
+def depth_loss(pred, target):
+    pass

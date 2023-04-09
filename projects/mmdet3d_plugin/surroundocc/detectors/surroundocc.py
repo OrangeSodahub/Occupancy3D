@@ -104,7 +104,7 @@ class SurroundOcc(MVXTwoStageDetector):
 
         # predict depth map
         # TODO: for now only support single frame
-        depth_pred = self.pts_backbone(pts_feats)
+        pts_feats_with_depth, depth_pred = self.pts_backbone(pts_feats, img_metas, True)
         # TODO: fix loss
         losses_depth = self.pts_backbone.loss(depth_pred, depth_gt)
         losses.update(losses_depth)
@@ -112,7 +112,7 @@ class SurroundOcc(MVXTwoStageDetector):
         # predict occ volume
         # `voxel_semantics` only used in loss calculation
         # with multi-scale supervision
-        occ_pred = self.pts_bbox_head(pts_feats, img_metas)
+        occ_pred = self.pts_bbox_head(pts_feats_with_depth, img_metas)
         loss_inputs = [voxel_semantics, mask_camera, occ_pred]
         losses_occ = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
 

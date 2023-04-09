@@ -60,7 +60,12 @@ model = dict(
         num_outs=3,
         relu_before_extra_convs=True),
     pts_backbone=dict(
-        type='BaseDepthnet'
+        type='BaseDepthNet',
+        output_channels=80,
+        depth_net_conf=dict(
+            in_channels=512,
+            mid_channels=512
+        ),
     ),
     pts_bbox_head=dict(
         type='OccHead',
@@ -123,7 +128,7 @@ train_pipeline = [
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-    dict(type='CustomCollect3D', keys=[ 'img', 'voxel_semantics', 'mask_lidar', 'mask_camera'])
+    dict(type='CustomCollect3D', keys=[ 'img', 'voxel_semantics', 'mask_lidar', 'mask_camera', 'depth_gt'])
 ]
 
 test_pipeline = [
