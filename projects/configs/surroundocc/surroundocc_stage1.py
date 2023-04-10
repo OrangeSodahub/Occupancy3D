@@ -10,6 +10,7 @@ plugin_dir = 'projects/mmdet3d_plugin/'
 # cloud range accordingly
 point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
 occ_size = [200, 200, 16]
+volume_size = [100, 100, 8]
 use_semantic = True
 use_mask = False
 
@@ -27,16 +28,9 @@ input_modality = dict(
     use_map=False,
     use_external=True)
 
-_dim_ = [128, 256, 512]
-_ffn_dim_ = [256, 512, 1024]
-volume_h_ = [100, 50, 25]
-volume_w_ = [100, 50, 25]
-volume_z_ = [8, 4, 2]
-_num_points_ = [2, 4, 8]
-_num_layers_ = [1, 3, 6]
-
 model = dict(
     type='SurroundOcc',
+    stage='stage1',
     use_grid_mask=True,
     use_semantic=use_semantic,
     img_backbone=dict(
@@ -57,71 +51,32 @@ model = dict(
         out_channels=512,
         start_level=0,
         add_extra_convs='on_output',
-        num_outs=3,
+        num_outs=0,
         relu_before_extra_convs=True),
     pts_backbone=dict(
         type='BaseDepthNet',
+        volume_size=volume_size, # (100, 100, 8)
+        pc_range=point_cloud_range,
+        x_bound=[-40, 40, 0.4],
+        y_bound=[-40, 40, 0.4],
+        z_bound=[-1, 5.4, 0.4],
+        # TODO: verify d_bound
+        d_bound=[2, 58, 0.5],
         output_channels=80,
         depth_net_conf=dict(
             in_channels=512,
             mid_channels=512)),
-    pts_bbox_head=dict(
-        type='OccHead',
-        volume_h=volume_h_,
-        volume_w=volume_w_,
-        volume_z=volume_z_,
-        occ_size=occ_size,
-        num_query=900,
-        num_classes=18,
-        conv_input=[_dim_[2], 256, _dim_[1], 128, _dim_[0], 64, 64],
-        conv_output=[256, _dim_[1], 128, _dim_[0], 64, 64, 32],
-        out_indices=[0, 2, 4, 6],
-        upsample_strides=[1, 2, 1, 2, 1, 2, 1],
-        embed_dims=_dim_,
-        img_channels=[512, 512, 512],
-        use_semantic=use_semantic,
-        use_mask=use_mask,
-        transformer_template=dict(
-            type='PerceptionTransformer',
-            embed_dims=_dim_,
-            encoder=dict(
-                type='OccEncoder',
-                num_layers=_num_layers_,
-                pc_range=point_cloud_range,
-                return_intermediate=False,
-                transformerlayers=dict(
-                    type='OccLayer',
-                    attn_cfgs=[
-                        dict(
-                            type='SpatialCrossAttention',
-                            pc_range=point_cloud_range,
-                            deformable_attention=dict(
-                                type='MSDeformableAttention3D',
-                                embed_dims=_dim_,
-                                num_points=_num_points_,
-                                num_levels=1),
-                            embed_dims=_dim_,
-                        )
-                    ],
-                    feedforward_channels=_ffn_dim_,
-                    ffn_dropout=0.1,
-                    embed_dims=_dim_,
-                    conv_num=2,
-                    operation_order=('cross_attn', 'norm',
-                                     'ffn', 'norm', 'conv')))),
-),
+        agg_voxel_mode='mean',
 )
 
 dataset_type = 'CustomNuScenesOccDataset'
 data_root = 'data/occ3d-nus/'
 file_client_args = dict(backend='disk')
-occ_gt_data_root='data/occ3d-nus'
 depth_gt_data_root='data/depth_gt'
 
 train_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
     dict(type='PhotoMetricDistortionMultiViewImage'),
-    dict(type='LoadOccupancy', data_root=occ_gt_data_root, use_semantic=use_semantic),
     dict(type='LoadDepthGT', data_root=depth_gt_data_root),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
@@ -131,7 +86,6 @@ train_pipeline = [
 
 test_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
-    dict(type='LoadOccupancy', data_root=occ_gt_data_root, use_semantic=use_semantic),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),

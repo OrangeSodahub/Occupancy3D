@@ -18,6 +18,7 @@ from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 @DETECTORS.register_module()
 class SurroundOcc(MVXTwoStageDetector):
     def __init__(self,
+                 stage=None,
                  use_grid_mask=False,
                  pts_voxel_layer=None,
                  pts_voxel_encoder=None,
@@ -44,6 +45,8 @@ class SurroundOcc(MVXTwoStageDetector):
                              img_backbone, pts_backbone, img_neck, pts_neck,
                              pts_bbox_head, img_roi_head, img_rpn_head,
                              train_cfg, test_cfg, pretrained)
+        assert stage in ['stage1', 'stage2']
+        self.stage = stage
         self.grid_mask = GridMask(
             True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
         self.use_grid_mask = use_grid_mask
@@ -102,21 +105,24 @@ class SurroundOcc(MVXTwoStageDetector):
                           img_metas):
         losses = dict()
 
-        # predict depth map
-        # TODO: for now only support single frame
-        pts_feats_with_depth, depth_pred = self.pts_backbone(pts_feats, img_metas, True)
-        # TODO: fix loss
-        losses_depth = self.pts_backbone.loss(depth_pred, depth_gt)
-        losses.update(losses_depth)
+        # For now directly use existing depth model to
+        # generate depth map to test the performance
+        if self.stage == 'stage1':
+            # TODO: predict depth map
+            # TODO: for now only support single frame
+            depth_pred = self.pts_backbone(pts_feats, img_metas)
+            losses_depth = self.pts_backbone.loss(depth_pred, depth_gt)
+            losses.update(losses_depth)
 
         # predict occ volume
         # `voxel_semantics` only used in loss calculation
         # with multi-scale supervision
-        occ_pred = self.pts_bbox_head(pts_feats_with_depth, img_metas)
-        loss_inputs = [voxel_semantics, mask_camera, occ_pred]
-        losses_occ = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
+        elif self.stage == 'stage2':
+            occ_pred = self.pts_bbox_head(pts_feats, img_metas)
+            loss_inputs = [voxel_semantics, mask_camera, occ_pred]
+            losses_occ = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
+            losses.update(losses_occ)
 
-        losses.update(losses_occ)
         return losses
 
     def forward_dummy(self, img):

@@ -3,3 +3,6 @@ data/
 
 # Python
 *pycache*
+
+# Debug
+*debug*

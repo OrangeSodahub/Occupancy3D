@@ -11,7 +11,6 @@ def multiscale_supervision(voxel_semantics, ratio, gt_shape, original_coords):
     # `gt_shape: (bs, num_classes, W, H, Z)`
     # `gt: (bs, W, H, Z)`
     gt = torch.zeros([gt_shape[0], gt_shape[2], gt_shape[3], gt_shape[4]]).to(voxel_semantics.device).type(torch.float) 
-    # TODO: verify, 0 or 17?
     # In the dataset provided by CVPR2023 challenge, all the voxels
     # which has no labels (0-16) are labeled as 17 (free or empty)
     gt += 17

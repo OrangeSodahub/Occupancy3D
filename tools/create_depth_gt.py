@@ -10,22 +10,46 @@ from nuscenes.utils.geometry_utils import view_points
 from pyquaternion import Quaternion
 
 
+data_root = 'data/nuScenes'
+info_path = 'data/occ3d-nus/occ_infos_temporal_train.pkl'
+save_root = 'data/depth_gt'
+
+lidar_key = 'LIDAR_TOP'
+cam_keys = [
+    'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_RIGHT', 'CAM_BACK', 'CAM_BACK_LEFT'
+]
+
+
+# TODO: get downsampled depth gt
+def transform_depth(depth, h, w):
+    depth_map = np.zeros((h, w))
+    depth_coords = depth[:, :2].astype(np.int16)
+    valid_mask = ((depth_coords[:, 1] < h)
+                  & (depth_coords[:, 0] < w)
+                  & (depth_coords[:, 1] >= 0)
+                  & (depth_coords[:, 0] >= 0))
+    depth_map[depth_coords[valid_mask, 1],
+              depth_coords[valid_mask, 0]] = depth[valid_mask, 2]
+    return depth_map
+
+
 # https://github.com/nutonomy/nuscenes-devkit/blob/master/python-sdk/nuscenes/nuscenes.py#L834
-def map_pointcloud_to_image(
+def generate_depth_map(
     pc,
     im,
     lidar_calibrated_sensor,
     lidar_ego_pose,
     cam_calibrated_sensor,
     cam_ego_pose,
+    h, w,
     min_dist: float = 0.0,
 ):
 
     # Points live in the point sensor frame. So they need to be
     # transformed via global to the image plane.
+
     # First step: transform the pointcloud to the ego vehicle
     # frame for the timestamp of the sweep.
-
     pc = LidarPointCloud(pc.T)
     pc.rotate(Quaternion(lidar_calibrated_sensor['rotation']).rotation_matrix)
     pc.translate(np.array(lidar_calibrated_sensor['translation']))
@@ -68,21 +92,13 @@ def map_pointcloud_to_image(
     points = points[:, mask]
     coloring = coloring[mask]
 
-    return points, coloring
+    depth = np.concatenate([points[:2, :].T, coloring[:, None]], axis=1)
 
-
-version = 'v1.0-trainval'
-data_root = 'data/nuScenes'
-info_path = 'data/occ3d-nus/occ_infos_temporal_train.pkl'
-save_root = 'data'
-
-lidar_key = 'LIDAR_TOP'
-cam_keys = [
-    'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_RIGHT', 'CAM_BACK', 'CAM_BACK_LEFT'
-]
+    return transform_depth(depth, h, w)
 
 
 def worker(info):
+    timestamp = info['timestamp']
     lidar_path = info['lidar_path']
     points = np.fromfile(lidar_path, dtype=np.float32, count=-1).reshape(-1, 5)[..., :4]
     lidar_calibrated_sensor = {
@@ -93,6 +109,9 @@ def worker(info):
         'translation': info['ego2global_translation'],
         'rotation': info['ego2global_rotation']
     }
+
+    filename_list = []
+    all_depth_map = []
     for _, cam_key in enumerate(cam_keys):
         cam_calibrated_sensor = {
             'translation': info['cams'][cam_key]['sensor2ego_translation'],
@@ -104,18 +123,20 @@ def worker(info):
             'rotation': info['cams'][cam_key]['ego2global_rotation']
         }
         img = mmcv.imread(info['cams'][cam_key]['data_path'])
-        pts_img, depth = map_pointcloud_to_image(
+        H, W, _ = img.shape
+        depth_map = generate_depth_map(
             points.copy(), img, lidar_calibrated_sensor.copy(),
-            lidar_ego_pose.copy(), cam_calibrated_sensor, cam_ego_pose)
-        file_name = os.path.split(info['cams'][cam_key]['data_path'])[-1]
-        save_path = os.path.join(save_root, 'depth_gt', f'{file_name}.bin')
-        np.concatenate([pts_img[:2, :].T, depth[:, None]], axis=1
-                        ).astype(np.float32).flatten().tofile(save_path)
-        return save_path
+            lidar_ego_pose.copy(), cam_calibrated_sensor, cam_ego_pose, H, W)
+        file_name = timestamp
+        save_path = os.path.join(save_root, f'{file_name}.npy')
+        all_depth_map.append(depth_map)
+        filename_list.append(f'{file_name}.npy')
+    np.save(save_path, np.array(all_depth_map).astype(np.float32))
+    return filename_list
 
 
 if __name__ == '__main__':
-    mmcv.mkdir_or_exist(os.path.join(save_root, 'depth_gt'))
+    mmcv.mkdir_or_exist(save_root)
 
     # Here we add depth gt information to existing pkl files
     # Need to create symbolic in /occ3d-nus/samples/LIDAR_TOP

@@ -54,10 +54,10 @@ class LoadDepthGT(object):
     
     def __call__(self, results):
         depth_gt_path = results['depth_path']
-        # TODO: fix depth_gt_path to relative path
-        depth_gt_path = os.path.join(depth_gt_path)
-        depth_gt = np.fromfile(depth_gt_path)
+        depth_gt_path = os.path.join(self.data_root, depth_gt_path)
 
+        # depth_gt: shape (num_cam, h, w)=(6, 900, 1600)
+        depth_gt = np.load(depth_gt_path)
         results['depth_gt'] = depth_gt
 
         return results
