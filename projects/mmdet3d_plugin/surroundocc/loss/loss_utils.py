@@ -108,12 +108,12 @@ def depth_loss(pred, target):
 
 
 def BCE_ssc_loss(pred, target, class_weights, alpha):
-    class_weights = class_weights.type_as(ssc_gt)
-    ones = torch.ones_like(ssc_gt).to(ssc_gt.device)
-    ssc_gt = torch.where(torch.logical_or(ssc_gt==255, ssc_gt==0), ssc_gt, ones) # [1, 200, 200, 16]
+    class_weights = class_weights.float().to(pred.device)
+    ones = torch.ones_like(target).to(pred.device)
+    target = torch.where(torch.logical_or(target==255, target==0), target, ones) # [1, 200, 200, 16]
     
-    class_weights[0] = 1-alpha  # empty                 
-    class_weights[1] = alpha    # occupied                      
+    class_weights[0] = 1-alpha  # empty
+    class_weights[1] = alpha    # occupied
 
     criterion = nn.CrossEntropyLoss(
         weight=class_weights, ignore_index=255, reduction="none"
@@ -122,4 +122,4 @@ def BCE_ssc_loss(pred, target, class_weights, alpha):
     loss_valid = loss[target!=255]
     loss_valid_mean = torch.mean(loss_valid)
 
-    return loss_valid_mean
+    return loss_valid_mean * 10

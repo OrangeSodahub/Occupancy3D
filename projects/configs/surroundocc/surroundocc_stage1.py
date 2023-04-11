@@ -86,7 +86,7 @@ train_pipeline = [
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-    dict(type='CustomCollect3D', keys=[ 'img', 'depth_gt'])
+    dict(type='CustomCollect3D', keys=['img', 'voxel_semantics', 'mask_lidar', 'mask_camera', 'depth_gt'])
 ]
 
 test_pipeline = [
