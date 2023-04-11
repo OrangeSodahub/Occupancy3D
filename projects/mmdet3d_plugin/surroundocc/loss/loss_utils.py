@@ -105,3 +105,7 @@ def sem_scal_loss(pred, ssc_target):
 
 def depth_loss(pred, target):
     pass
+
+
+def BEC_ssc_loss():
+    pass

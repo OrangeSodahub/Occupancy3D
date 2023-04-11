@@ -55,7 +55,7 @@ model = dict(
         relu_before_extra_convs=True),
     pts_backbone=dict(
         type='BaseDepthNet',
-        volume_size=volume_size, # (100, 100, 8)
+        occ_size=occ_size, # (200, 200, 16)
         pc_range=point_cloud_range,
         x_bound=[-40, 40, 0.4],
         y_bound=[-40, 40, 0.4],
@@ -65,8 +65,12 @@ model = dict(
         output_channels=80,
         depth_net_conf=dict(
             in_channels=512,
-            mid_channels=512)),
+            mid_channels=512),
         agg_voxel_mode='mean',
+        ssc_net_conf=dict(
+            class_num=2,
+            input_dimensions=occ_size, # (200, 200, 16)
+            out_scale="1_2")),
 )
 
 dataset_type = 'CustomNuScenesOccDataset'
@@ -81,7 +85,7 @@ train_pipeline = [
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-    dict(type='CustomCollect3D', keys=[ 'img', 'voxel_semantics', 'mask_lidar', 'mask_camera', 'depth_gt'])
+    dict(type='CustomCollect3D', keys=[ 'img', 'depth_gt'])
 ]
 
 test_pipeline = [

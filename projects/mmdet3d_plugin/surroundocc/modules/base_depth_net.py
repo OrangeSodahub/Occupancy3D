@@ -7,9 +7,10 @@ from torch.cuda.amp.autocast_mode import autocast
 
 from mmdet3d.models.builder import BACKBONES
 from mmdet.models.backbones.resnet import BasicBlock
+from projects.mmdet3d_plugin.surroundocc.modules.lmscnet import LMSCNet_SS
 from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import depth_loss
-from projects.mmdet3d_plugin.surroundocc.modules.depth.frustum_grid_generator import FrustumGridGenerator
 from projects.mmdet3d_plugin.surroundocc.modules.depth.sampler import Sampler
+from projects.mmdet3d_plugin.surroundocc.modules.depth.frustum_grid_generator import FrustumGridGenerator
 
 
 __all__ = ['BaseLSSFPN']
@@ -223,68 +224,11 @@ class DepthNet(nn.Module):
         return depth
 
 
-class DepthAggregation(nn.Module):
-    """
-    pixel cloud feature extraction
-    """
-
-    def __init__(self, in_channels, mid_channels, out_channels):
-        super(DepthAggregation, self).__init__()
-
-        self.reduce_conv = nn.Sequential(
-            nn.Conv2d(in_channels,
-                      mid_channels,
-                      kernel_size=3,
-                      stride=1,
-                      padding=1,
-                      bias=False),
-            nn.BatchNorm2d(mid_channels),
-            nn.ReLU(inplace=True),
-        )
-
-        self.conv = nn.Sequential(
-            nn.Conv2d(mid_channels,
-                      mid_channels,
-                      kernel_size=3,
-                      stride=1,
-                      padding=1,
-                      bias=False),
-            nn.BatchNorm2d(mid_channels),
-            nn.ReLU(inplace=True),
-            nn.Conv2d(mid_channels,
-                      mid_channels,
-                      kernel_size=3,
-                      stride=1,
-                      padding=1,
-                      bias=False),
-            nn.BatchNorm2d(mid_channels),
-            nn.ReLU(inplace=True),
-        )
-
-        self.out_conv = nn.Sequential(
-            nn.Conv2d(mid_channels,
-                      out_channels,
-                      kernel_size=3,
-                      stride=1,
-                      padding=1,
-                      bias=True),
-            # nn.BatchNorm3d(out_channels),
-            # nn.ReLU(inplace=True),
-        )
-
-    @autocast(False)
-    def forward(self, x):
-        x = self.reduce_conv(x)
-        x = self.conv(x) + x
-        x = self.out_conv(x)
-        return x
-
-
 @BACKBONES.register_module()
 class BaseDepthNet(nn.Module):
 
     def __init__(self,
-                 volume_size,
+                 occ_size,
                  pc_range,
                  x_bound,
                  y_bound,
@@ -293,14 +237,13 @@ class BaseDepthNet(nn.Module):
                  output_channels,
                  depth_net_conf,
                  agg_voxel_mode,
-                 use_da=False):
+                 ssc_net_conf):
         """Modified from `https://github.com/nv-tlabs/lift-splat-shoot`.
 
         """
         super(BaseDepthNet, self).__init__()
         self.output_channels = output_channels
         # TODO: fix self.depth_channels
-        # max/default is 64
         self.d_bound = d_bound
         self.depth_channels = int((self.d_bound[1] - self.d_bound[0]) / self.d_bound[2])
         self.depth_net = DepthNet(
@@ -308,6 +251,11 @@ class BaseDepthNet(nn.Module):
             depth_net_conf['mid_channels'],
             self.output_channels,
             self.depth_channels,
+        )
+        self.ssc_net = LMSCNet_SS(
+            ssc_net_conf['class_num'],
+            ssc_net_conf['input_dimensions'],
+            ssc_net_conf['out_scale'],
         )
         self.agg_voxel_mode = agg_voxel_mode
 
@@ -322,34 +270,39 @@ class BaseDepthNet(nn.Module):
         }
         self.disc_cfg = disc_cfg
         self.grid_generator = FrustumGridGenerator(
-            grid_size=volume_size, pc_range=pc_range, disc_cfg=disc_cfg)
+            grid_size=occ_size, pc_range=pc_range, disc_cfg=disc_cfg)
         self.sampler = Sampler(mode="bilinear", padding_mode="zeros")
-        
-        self.use_da = use_da
-        if self.use_da:
-            self.depth_aggregation_net = DepthAggregation(self.output_channels, self.output_channels,
-                                self.output_channels)
 
-    def forward(self, img_feats, img_metas):
-        # img_neck outputs 3 feature layers
-        # here only select the first one with
-        # shape of (bs, n, c, h, w)=(1, 6, 512, 116, 200)
-        img_feat = img_feats[0]
+        # ssc loss
+        self.class_frequencies_level_1 =  np.array([5.41773033e09, 4.03113667e08])
+        self.class_weights_level_1 = torch.from_numpy(
+            1 / np.log(self.class_frequencies_level_1 + 0.001)
+        )
+
+    def forward_ssc_net(self, voxel_feats, img_metas):
+        return self.ssc_net()
+        
+    def forward_depth_net(self, img_feat, img_metas, with_depth_gt=False):
+        # (1, 6, 512, 116, 200)
         bs, n, c, h, w = img_feat.shape
         img_feat = img_feat.reshape(bs*n, c, h, w)
         # intrinsics_mat: shape (bs, n_cam, 4, 4)
         cam_intrinsic = img_metas[0]['cam_intrinsic']
         intrinsics_mat = torch.from_numpy(np.array(cam_intrinsic))
         intrinsics_mat = intrinsics_mat[None].repeat(bs, 1, 1, 1)
+
+        # Generate sampling grid for frustum volume
+        image_shape = intrinsics_mat.new_zeros(bs, 2)
+        # TODO: fix 116 200
+        image_shape[:, 0:2] = torch.as_tensor((116, 200))
         
         # get depth prediction
         # depth_feature of shape (bs*n, depth_channels, h, w)=(6, 112, 116, 200)
         depth_feature = self.depth_net(img_feat, intrinsics_mat)
         depth_pred = depth_feature[:, :self.depth_channels].softmax(
             dim=1, dtype=depth_feature.dtype)
-        depth_pred = depth_pred.reshape(bs, n, -1, h, w)
 
-        # add cam dim
+        # add cam dim -> depth_pred: (bs, n, 1, depth_channels, h, w)->(1, 6, 1, 112, 116, 200)
         depth_pred = depth_pred.unsqueeze(1)
         depth_pred = depth_pred.reshape(bs, n, depth_pred.shape[1], depth_pred.shape[2],
                                                depth_pred.shape[3], depth_pred.shape[4])
@@ -357,16 +310,16 @@ class BaseDepthNet(nn.Module):
         # generate voxel features based on depth features
         all_voxel_features = []
         for i in range(n):
-            # grid: shape (B, X, Y, Z, 3) -> (1, 100, 100, 8, 3)
+            # grid: shape (B, X, Y, Z, 3) -> (1, 200, 200, 16, 3)
             grid = self.grid_generator(
-                ego_to_lidar = img_metas[0]['ego2lidar'][i],
+                ego_to_lidar = img_metas[0]['ego2lidar'],
                 lidar_to_cam=img_metas[0]['lidar2cam'][i],
                 cam_to_img=intrinsics_mat[:, i, :3, :],
                 # TODO: image shape (feature map)
-                image_shape=...,
-            )
+                image_shape=image_shape,
+            ).to(depth_pred.dtype).to(depth_pred.device)
             # sample frustum volume to generate voxel volume
-            # voxel_feaetures: shape (B, depth_channel, X, Y, Z)
+            # voxel_feaetures: shape (B, C, X, Y, Z)->(1, 1, 200, 200, 16)
             # input: depth->(bs, depth_channel, h, w), grid->(bs, X, Y, Z, 3)
             voxel_features = self.sampler(
                 input_features=depth_pred[:, i, ...], grid=grid
@@ -392,9 +345,28 @@ class BaseDepthNet(nn.Module):
             )
 
         # TODO: return depth pred when depth loss fixed
-        return agg_voxel_features 
+        # agg_voxel_feature: (B, C, X, Y ,Z)->(1, 1, 200, 200, 16)
+        if with_depth_gt:
+            return agg_voxel_features, depth_pred.squeeze(2)
+        return agg_voxel_features, None
 
-    def loss(self, depth_pred, depth_gt):
+    def forward(self, img_feats, img_metas, with_depth_gt=False):
+        # img_neck outputs 3 feature layers
+        # here only select the first one with
+        # TODO: optimize
+        img_feat = img_feats[0]
+        # 3d voxel features: (1, 1, 200, 200, 16)
+        voxel_features, depth_pred = self.forward_depth_net(img_feat, img_metas, with_depth_gt)
+        voxel_features = voxel_features.squeeze(1)
+        occ_pred = self.forward_ssc_net(voxel_features, img_metas)
+        print(occ_pred.shape)
+
+        if with_depth_gt:
+            return occ_pred, depth_pred
+        return occ_pred, None
+
+
+    def loss(self, ssc_pred, depth_pred, ssc_gt, depth_gt):
         """depth loss
             depth_pred: shape (bs, N, 64, h, w)
             depth_gt: shape (N, H, W)
@@ -405,10 +377,18 @@ class BaseDepthNet(nn.Module):
             depth_pred = depth_pred.squeeze(0)
         else:
             raise NotImplementedError
+
         losses = dict()
+
         # TODO: depth loss
-        raise NotImplementedError
-        # loss = depth_loss(depth_pred, depth_gt)
-        # losses['depth_loss'] = loss
+        loss = depth_loss(depth_pred, depth_gt)
+        losses['depth_loss'] = loss
+
+        # ssc loss
+        class_weights_level_1 = self.class_weights_level_1.type_as(ssc_gt)
+        ones = torch.ones_like(ssc_gt).to(ssc_gt.device)
+        ssc_gt = torch.where(torch.logical_or(ssc_gt==255, ssc_gt==0), ssc_gt, ones) # [1, 200, 200, 16]        
+        loss_sc = BCE_ssc_loss(ssc_pred, ssc_gt, class_weights_level_1, 0.54)
+        losses['loss_sc'] = loss_sc
 
         return losses

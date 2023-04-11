@@ -108,16 +108,20 @@ class SurroundOcc(MVXTwoStageDetector):
         # For now directly use existing depth model to
         # generate depth map to test the performance
         if self.stage == 'stage1':
+            assert self.pts_backbone is not None
             # TODO: predict depth map
             # TODO: for now only support single frame
-            depth_pred = self.pts_backbone(pts_feats, img_metas)
-            losses_depth = self.pts_backbone.loss(depth_pred, depth_gt)
+            with_depgh_gt = (depth_gt is not None)
+            ssc_pred, depth_pred = self.pts_backbone(pts_feats, img_metas, with_depgh_gt)
+            loss_inputs = [ssc_pred, depth_pred, voxel_semantics, depth_gt]
+            losses_depth = self.pts_backbone.loss(*loss_inputs)
             losses.update(losses_depth)
 
         # predict occ volume
         # `voxel_semantics` only used in loss calculation
         # with multi-scale supervision
         elif self.stage == 'stage2':
+            assert self.pts_bbox_head is not None
             occ_pred = self.pts_bbox_head(pts_feats, img_metas)
             loss_inputs = [voxel_semantics, mask_camera, occ_pred]
             losses_occ = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
