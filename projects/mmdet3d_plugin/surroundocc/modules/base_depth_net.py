@@ -8,7 +8,7 @@ from torch.cuda.amp.autocast_mode import autocast
 from mmdet3d.models.builder import BACKBONES
 from mmdet.models.backbones.resnet import BasicBlock
 from projects.mmdet3d_plugin.surroundocc.modules.lmscnet import LMSCNet_SS
-from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import depth_loss
+from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import depth_loss, BCE_ssc_loss
 from projects.mmdet3d_plugin.surroundocc.modules.depth.sampler import Sampler
 from projects.mmdet3d_plugin.surroundocc.modules.depth.frustum_grid_generator import FrustumGridGenerator
 
@@ -280,7 +280,7 @@ class BaseDepthNet(nn.Module):
         )
 
     def forward_ssc_net(self, voxel_feats, img_metas):
-        return self.ssc_net()
+        return self.ssc_net.forward(voxel_feats, img_metas)
         
     def forward_depth_net(self, img_feat, img_metas, with_depth_gt=False):
         # (1, 6, 512, 116, 200)
@@ -372,23 +372,18 @@ class BaseDepthNet(nn.Module):
             depth_gt: shape (N, H, W)
         """
         # TODO: only support batch_size=1 now
-        # depth_pred: shape (n, 64, h, w)
-        if depth_pred.shape[0] == 1:
-            depth_pred = depth_pred.squeeze(0)
-        else:
-            raise NotImplementedError
-
         losses = dict()
 
-        # TODO: depth loss
-        loss = depth_loss(depth_pred, depth_gt)
-        losses['depth_loss'] = loss
+        # depth_pred: shape (n, 64, h, w)
+        if depth_pred is not None and depth_pred.shape[0] == 1:
+            depth_pred = depth_pred.squeeze(0)
+            # TODO: depth loss
+            raise NotImplementedError
+            loss = depth_loss(depth_pred, depth_gt)
+            losses['depth_loss'] = loss
 
         # ssc loss
-        class_weights_level_1 = self.class_weights_level_1.type_as(ssc_gt)
-        ones = torch.ones_like(ssc_gt).to(ssc_gt.device)
-        ssc_gt = torch.where(torch.logical_or(ssc_gt==255, ssc_gt==0), ssc_gt, ones) # [1, 200, 200, 16]        
-        loss_sc = BCE_ssc_loss(ssc_pred, ssc_gt, class_weights_level_1, 0.54)
+        loss_sc = BCE_ssc_loss(ssc_pred, ssc_gt, self.class_weights_level_1, 0.54)
         losses['loss_sc'] = loss_sc
 
         return losses

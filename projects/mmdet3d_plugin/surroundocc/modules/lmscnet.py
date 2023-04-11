@@ -4,16 +4,13 @@
 # To view a copy of this license, visit
 # https://github.com/NVlabs/VoxFormer/blob/main/LICENSE
 
-import os
 import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
-from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import BEC_ssc_loss
 
-
-class LMSCNet_SS():
+class LMSCNet_SS(nn.Module):
 	def __init__(self,
 					class_num=None,
 					input_dimensions=None,
@@ -118,8 +115,8 @@ class LMSCNet_SS():
 		out_scale_1_8__2D = self.conv_out_scale_1_8(_skip_1_8)
 
 		if self.out_scale=="1_8":
-			out_scale_1_8__3D = self.seg_head_1_8(out_scale_1_8__2D) # [1, 20, 16, 128, 128]
-			ssc_pred = out_scale_1_8__3D.permute(0, 1, 4, 3, 2) # [1, 20, 128, 128, 16]
+			out_scale_1_8__3D = self.seg_head_1_8(out_scale_1_8__2D)
+			ssc_pred = out_scale_1_8__3D.permute(0, 1, 4, 3, 2)
 
 		elif self.out_scale=="1_4":
 			# Out 1_4
@@ -128,8 +125,8 @@ class LMSCNet_SS():
 			out = F.relu(self.conv1_4(out))
 			out_scale_1_4__2D = self.conv_out_scale_1_4(out)
 
-			out_scale_1_4__3D = self.seg_head_1_4(out_scale_1_4__2D) # [1, 20, 16, 128, 128]
-			ssc_pred = out_scale_1_4__3D.permute(0, 1, 4, 3, 2) # [1, 20, 128, 128, 16]
+			out_scale_1_4__3D = self.seg_head_1_4(out_scale_1_4__2D)
+			ssc_pred = out_scale_1_4__3D.permute(0, 1, 4, 3, 2)
 
 		elif self.out_scale=="1_2":
 			# Out 1_4
@@ -141,35 +138,35 @@ class LMSCNet_SS():
 			# Out 1_2
 			out = self.deconv1_4(out_scale_1_4__2D)
 			out = torch.cat((out, _skip_1_2, self.deconv_1_8__1_2(out_scale_1_8__2D)), 1)
-			out = F.relu(self.conv1_2(out)) # torch.Size([1, 48, 128, 128])
-			out_scale_1_2__2D = self.conv_out_scale_1_2(out) # torch.Size([1, 16, 128, 128])
+			out = F.relu(self.conv1_2(out))
+			out_scale_1_2__2D = self.conv_out_scale_1_2(out) # [1, 8, 100, 100]
 
-			out_scale_1_2__3D = self.seg_head_1_2(out_scale_1_2__2D) # [1, 20, 16, 128, 128]
-			ssc_pred = out_scale_1_2__3D.permute(0, 1, 4, 3, 2) # [1, 20, 128, 128, 16]
+			out_scale_1_2__3D = self.seg_head_1_2(out_scale_1_2__2D) # [1, 2, 8, 100, 100]
+			ssc_pred = out_scale_1_2__3D.permute(0, 1, 4, 3, 2) # [bs, C, H, W, D] -> [bs, C, D, W, H]
 
 		elif self.out_scale=="1_1":
 			# Out 1_4
 			out = self.deconv1_8(out_scale_1_8__2D)
-			print('out.shape', out.shape)  # [1, 4, 64, 64]
+			print('out.shape', out.shape)
 			out = torch.cat((out, _skip_1_4), 1)
 			out = F.relu(self.conv1_4(out))
 			out_scale_1_4__2D = self.conv_out_scale_1_4(out)
 
 			# Out 1_2
 			out = self.deconv1_4(out_scale_1_4__2D)
-			print('out.shape', out.shape)  # [1, 8, 128, 128]
+			print('out.shape', out.shape)
 			out = torch.cat((out, _skip_1_2, self.deconv_1_8__1_2(out_scale_1_8__2D)), 1)
-			out = F.relu(self.conv1_2(out)) # torch.Size([1, 48, 128, 128])
-			out_scale_1_2__2D = self.conv_out_scale_1_2(out) # torch.Size([1, 16, 128, 128])
+			out = F.relu(self.conv1_2(out))
+			out_scale_1_2__2D = self.conv_out_scale_1_2(out)
 
 			# Out 1_1
 			out = self.deconv1_2(out_scale_1_2__2D)
 			out = torch.cat((out, _skip_1_1, self.deconv_1_4__1_1(out_scale_1_4__2D), self.deconv_1_8__1_1(out_scale_1_8__2D)), 1)
-			out_scale_1_1__2D = F.relu(self.conv1_1(out)) # [bs, 32, 256, 256]
+			out_scale_1_1__2D = F.relu(self.conv1_1(out))
 
 			out_scale_1_1__3D = self.seg_head_1_1(out_scale_1_1__2D)
 			# Take back to [W, H, D] axis order
-			ssc_pred = out_scale_1_1__3D.permute(0, 1, 4, 3, 2)  # [bs, C, H, W, D] -> [bs, C, D, W, H]
+			ssc_pred = out_scale_1_1__3D.permute(0, 1, 4, 3, 2) # [bs, C, H, W, D] -> [bs, C, D, W, H]
 
 		return ssc_pred
 
@@ -221,14 +218,14 @@ class SegmentationHead(nn.Module):
 		# Dimension exapension
 		x_in = x_in[:, None, :, :, :]
 
-		# Convolution to go from inplanes to planes features...
+		# Convolution to go from inplanes to planes features
 		x_in = self.relu(self.conv0(x_in))
 
 		y = self.bn2[0](self.conv2[0](self.relu(self.bn1[0](self.conv1[0](x_in)))))
 		for i in range(1, len(self.conv_list)):
 			y += self.bn2[i](self.conv2[i](self.relu(self.bn1[i](self.conv1[i](x_in)))))
-			x_in = self.relu(y + x_in)  # modified
 
-			x_in = self.conv_classes(x_in)
+		x_in = self.relu(y + x_in) # modified
+		x_in = self.conv_classes(x_in)
 
 		return x_in

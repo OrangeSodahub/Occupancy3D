@@ -51,7 +51,7 @@ model = dict(
         out_channels=512,
         start_level=0,
         add_extra_convs='on_output',
-        num_outs=0,
+        num_outs=3,
         relu_before_extra_convs=True),
     pts_backbone=dict(
         type='BaseDepthNet',
@@ -81,7 +81,8 @@ depth_gt_data_root='data/depth_gt'
 train_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
     dict(type='PhotoMetricDistortionMultiViewImage'),
-    dict(type='LoadDepthGT', data_root=depth_gt_data_root),
+    # TODO: fix depth gt
+    # dict(type='LoadDepthGT', data_root=depth_gt_data_root),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
