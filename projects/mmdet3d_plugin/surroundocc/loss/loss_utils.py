@@ -109,8 +109,11 @@ def depth_loss(pred, target):
 
 def BCE_ssc_loss(pred, target, class_weights, alpha):
     class_weights = class_weights.float().to(pred.device)
-    ones = torch.ones_like(target).to(pred.device)
-    target = torch.where(torch.logical_or(target==255, target==0), target, ones) # [1, 200, 200, 16]
+
+    # binary classification
+    zeros_mask = (target == 17)
+    target[zeros_mask] = 0
+    target[~zeros_mask] = 1
     
     class_weights[0] = 1-alpha  # empty
     class_weights[1] = alpha    # occupied
