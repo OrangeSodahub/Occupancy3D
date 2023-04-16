@@ -116,7 +116,6 @@ dataset_type = 'CustomNuScenesOccDataset'
 data_root = 'data/occ3d-nus/'
 file_client_args = dict(backend='disk')
 occ_gt_data_root='data/occ3d-nus'
-depth_gt_data_root='data/depth_gt'
 
 train_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),

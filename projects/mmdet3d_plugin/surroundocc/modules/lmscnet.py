@@ -96,7 +96,7 @@ class LMSCNet_SS(nn.Module):
 		elif self.out_scale=="1_8":
 			self.seg_head_1_8 = SegmentationHead(1, 8, self.nbr_classes, [1, 2, 3])
 
-	def foward(self, depth, img_metas):
+	def forward(self, depth, img_metas):
 		"""
 		depth: voxel_featurs from depth net, shape (B, D, H, W)->(1, 100, 8, 100)
 		"""
@@ -106,10 +106,11 @@ class LMSCNet_SS(nn.Module):
 		input = depth.permute(0, 2, 3, 1)
 		
 		# Encoder block
-		_skip_1_1 = self.Encoder_block1(input)		# (1, 16, 200, 200)
-		_skip_1_2 = self.Encoder_block2(_skip_1_1)
-		_skip_1_4 = self.Encoder_block3(_skip_1_2) 
-		_skip_1_8 = self.Encoder_block4(_skip_1_4) 
+		_skip_1_1 = self.Encoder_block1(input)		# (1, 8, 100, 100)
+		_skip_1_2 = self.Encoder_block2(_skip_1_1)	# (1, 12, 50, 50)
+		_skip_1_4 = self.Encoder_block3(_skip_1_2) 	# (1, 16, 25, 25)
+		# TODO: fix the shape of (100, 100, 8) input
+		_skip_1_8 = self.Encoder_block4(_skip_1_4) 	# (1, 20, 12, 12)
 
 		# Out 1_8
 		out_scale_1_8__2D = self.conv_out_scale_1_8(_skip_1_8)

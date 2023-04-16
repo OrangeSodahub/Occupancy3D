@@ -129,4 +129,4 @@ def BCE_ssc_loss(pred, target, alpha, mask_camera):
     loss = criterion(pred, target.long())
     loss_mean = torch.mean(loss)
 
-    return loss_mean * 10
+    return loss_mean

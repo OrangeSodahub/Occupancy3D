@@ -143,7 +143,7 @@ class FrustumGridGenerator(nn.Module):
             device=image_shape.device,
             dtype=image_shape.dtype,
         )
-        # frustum_shape: (d, v, u)->(112, 116, 200) (3 of [B, D, W, H, 3])
+        # frustum_shape: (d, v, u)->(112, 900, 1600) (3 of [B, D, W, H, 3])
         # frustum_grid: (B, D, H, W, 3) with coords between (-1, 1)
         frustum_shape = torch.cat((image_depth, image_shape))
         frustum_grid = grid_utils.normalize_coords(

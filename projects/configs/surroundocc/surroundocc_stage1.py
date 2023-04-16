@@ -77,11 +77,13 @@ model = dict(
 dataset_type = 'CustomNuScenesOccDataset'
 data_root = 'data/occ3d-nus/'
 file_client_args = dict(backend='disk')
+occ_gt_data_root='data/occ3d-nus'
 depth_gt_data_root='data/depth_gt'
 
 train_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
     dict(type='PhotoMetricDistortionMultiViewImage'),
+    dict(type='LoadOccupancy', data_root=occ_gt_data_root, use_semantic=use_semantic),
     # TODO: fix depth gt
     # dict(type='LoadDepthGT', data_root=depth_gt_data_root),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
