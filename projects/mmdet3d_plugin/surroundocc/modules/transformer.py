@@ -89,6 +89,7 @@ class PerceptionTransformer(BaseModule):
             volume_h,
             volume_w,
             volume_z,
+            mask_gt,
             **kwargs):
 
         bs = mlvl_feats[0].size(0)
@@ -127,6 +128,7 @@ class PerceptionTransformer(BaseModule):
                 volume_h=volume_h,
                 volume_w=volume_w,
                 volume_z=volume_z,
+                mask_gt=mask_gt,
                 spatial_shapes=spatial_shapes,
                 level_start_index=level_start_index,
                 **kwargs

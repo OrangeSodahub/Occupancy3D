@@ -205,8 +205,25 @@ class OccHead(nn.Module):
             if hasattr(m, 'conv_offset'):
                 constant_init(m.conv_offset, 0)
 
+    def get_multiscale_occ_mask(self, original_gt, scale=1):
+        mask_gt = (original_gt == 17)
+        if scale > 1:
+            ratio = 2 ** scale
+            B, H, W, Z = original_gt.shape // ratio
+            gt = torch.zeros([B, H, W, Z]) + 17
+            original_coords = self.coords_grid.clone()
+            for i in range(gt.shape[0]):
+                original_coords = original_coords.to(original_gt.device)
+                voxel_semantics_with_coords = torch.vstack([original_coords.T, original_gt[i].reshape(-1)]).T
+                voxel_semantics_with_coords = voxel_semantics_with_coords[voxel_semantics_with_coords[:, 3] < 17]
+                downsampled_coords = torch.div(voxel_semantics_with_coords[:, :3].long(), ratio, rounding_mode='floor')
+                gt[i, downsampled_coords[:, 0], downsampled_coords[:, 1], downsampled_coords[:, 2]] = \
+                                                                                    voxel_semantics_with_coords[:, 3]
+                mask_gt = (gt == 17)
+        return mask_gt
+
     @auto_fp16(apply_to=('mlvl_feats'))
-    def forward(self, mlvl_feats, img_metas):
+    def forward(self, mlvl_feats, occ_gt, img_metas):
 
         # image feature map shape: (B, N, C, H, W)
         bs, num_cam, _, _, _ = mlvl_feats[0].shape
@@ -236,6 +253,7 @@ class OccHead(nn.Module):
             # `             [1]: (in) 512 (out) 256`
             # `             [2]: (in) 512 (out) 512`
             view_features = self.transfer_conv[i](mlvl_feats[i].reshape(bs*num_cam, C, H, W)).reshape(bs, num_cam, -1, H, W)
+            mask_gt = self.get_multiscale_occ_mask(occ_gt, scale=i)
 
             volume_embed_i = self.transformer[i](
                 [view_features],
@@ -243,10 +261,10 @@ class OccHead(nn.Module):
                 volume_h=volume_h,
                 volume_w=volume_w,
                 volume_z=volume_z,
+                mask_gt=mask_gt,
                 img_metas=img_metas
             )
             volume_embed.append(volume_embed_i)
-        
 
         volume_embed_reshape = []
         for i in range(self.fpn_level):
