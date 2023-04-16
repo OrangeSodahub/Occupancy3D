@@ -107,13 +107,18 @@ def depth_loss(pred, target):
     pass
 
 
-def BCE_ssc_loss(pred, target, class_weights, alpha):
-    class_weights = class_weights.float().to(pred.device)
+def BCE_ssc_loss(pred, target, alpha, mask_camera):
+    class_weights = torch.zeros((2)).float().to(pred.device)
 
     # binary classification
     zeros_mask = (target == 17)
     target[zeros_mask] = 0
     target[~zeros_mask] = 1
+
+    # TODO: remove outside camera range
+    # mask_camera = mask_camera.bool()
+    # pred = pred[mask_camera, :]
+    # target = target[mask_camera]
     
     class_weights[0] = 1-alpha  # empty
     class_weights[1] = alpha    # occupied
@@ -122,7 +127,6 @@ def BCE_ssc_loss(pred, target, class_weights, alpha):
         weight=class_weights, ignore_index=255, reduction="none"
     )
     loss = criterion(pred, target.long())
-    loss_valid = loss[target!=255]
-    loss_valid_mean = torch.mean(loss_valid)
+    loss_mean = torch.mean(loss)
 
-    return loss_valid_mean * 10
+    return loss_mean * 10

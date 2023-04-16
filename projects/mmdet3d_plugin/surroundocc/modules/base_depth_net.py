@@ -228,7 +228,8 @@ class DepthNet(nn.Module):
 class BaseDepthNet(nn.Module):
 
     def __init__(self,
-                 occ_size,
+                 occ_size,      # (200, 200, 16)
+                 volume_size,   # (100, 100, 8)
                  pc_range,
                  x_bound,
                  y_bound,
@@ -259,6 +260,7 @@ class BaseDepthNet(nn.Module):
         )
         self.agg_voxel_mode = agg_voxel_mode
 
+        self.volume_size = volume_size
         self.x_bound = x_bound
         self.y_bound = y_bound
         self.z_bound = z_bound
@@ -270,18 +272,19 @@ class BaseDepthNet(nn.Module):
         }
         self.disc_cfg = disc_cfg
         self.grid_generator = FrustumGridGenerator(
-            grid_size=occ_size, pc_range=pc_range, disc_cfg=disc_cfg)
+            grid_size=volume_size, pc_range=pc_range, disc_cfg=disc_cfg)
         self.sampler = Sampler(mode="bilinear", padding_mode="zeros")
 
-        # ssc loss
-        self.class_frequencies_level_1 =  np.array([5.41773033e09, 4.03113667e08])
-        self.class_weights_level_1 = torch.from_numpy(
-            1 / np.log(self.class_frequencies_level_1 + 0.001)
-        )
+        # original grid
+        g_xx = np.arange(0, occ_size[0]) # [0, 1, ..., 199]
+        g_yy = np.arange(0, occ_size[1]) # [0, 1, ..., 199]
+        g_zz = np.arange(0, occ_size[2]) # [0, 1, ..., 15]
+        xx, yy, zz = np.meshgrid(g_xx, g_yy, g_zz)
+        self.original_coords = torch.from_numpy(np.array([xx.flatten(), yy.flatten(), zz.flatten()]).T)
 
     def forward_ssc_net(self, voxel_feats, img_metas):
-        return self.ssc_net.forward(voxel_feats, img_metas)
-        
+        return self.ssc_net(voxel_feats, img_metas)
+
     def forward_depth_net(self, img_feat, img_metas, with_depth_gt=False):
         # (1, 6, 512, 116, 200)
         bs, n, c, h, w = img_feat.shape
@@ -293,8 +296,9 @@ class BaseDepthNet(nn.Module):
 
         # Generate sampling grid for frustum volume
         image_shape = intrinsics_mat.new_zeros(bs, 2)
-        # TODO: fix 116 200
-        image_shape[:, 0:2] = torch.as_tensor((116, 200))
+        # NOTE: the original image shape (900, 1600), not featre map
+        # is used to normalize the image coordinates of grids
+        image_shape[:, 0:2] = torch.as_tensor((900, 1600))
         
         # get depth prediction
         # depth_feature of shape (bs*n, depth_channels, h, w)=(6, 112, 116, 200)
@@ -310,17 +314,19 @@ class BaseDepthNet(nn.Module):
         # generate voxel features based on depth features
         all_voxel_features = []
         for i in range(n):
-            # grid: shape (B, X, Y, Z, 3) -> (1, 200, 200, 16, 3)
+            # grid: shape (B, D, W, H, 3) -> (1, 100, 100, 8, 3)
+            # 3: normalized pixel coords (u, v) and depth, (u, v, d)
             grid = self.grid_generator(
                 ego_to_lidar = img_metas[0]['ego2lidar'],
                 lidar_to_cam=img_metas[0]['lidar2cam'][i],
                 cam_to_img=intrinsics_mat[:, i, :3, :],
-                # TODO: image shape (feature map)
                 image_shape=image_shape,
             ).to(depth_pred.dtype).to(depth_pred.device)
+            # grid: (B, D, H, W, 3)
+            grid = grid.permute(0, 1, 3, 2, 4)
             # sample frustum volume to generate voxel volume
-            # voxel_feaetures: shape (B, C, X, Y, Z)->(1, 1, 200, 200, 16)
-            # input: depth->(bs, depth_channel, h, w), grid->(bs, X, Y, Z, 3)
+            # voxel_feaetures: shape (B, C, D, H, W)->(1, 1, 100, 8, 100)
+            # input: depth->(bs, depth_channel, h, w), grid->(bs, D, H, W, 3)
             voxel_features = self.sampler(
                 input_features=depth_pred[:, i, ...], grid=grid
             )
@@ -345,7 +351,7 @@ class BaseDepthNet(nn.Module):
             )
 
         # TODO: return depth pred when depth loss fixed
-        # agg_voxel_feature: (B, C, X, Y ,Z)->(1, 1, 200, 200, 16)
+        # agg_voxel_feature: (B, C, D, H, W)->(1, 1, 100, 8, 100)
         if with_depth_gt:
             return agg_voxel_features, depth_pred.squeeze(2)
         return agg_voxel_features, None
@@ -355,20 +361,35 @@ class BaseDepthNet(nn.Module):
         # here only select the first one with
         # TODO: optimize
         img_feat = img_feats[0]
-        # 3d voxel features: (1, 1, 200, 200, 16)
+        # 3d voxel features: (1, 1, 100, 8, 100)
         voxel_features, depth_pred = self.forward_depth_net(img_feat, img_metas, with_depth_gt)
         voxel_features = voxel_features.squeeze(1)
         occ_pred = self.forward_ssc_net(voxel_features, img_metas)
-        print(occ_pred.shape)
 
         if with_depth_gt:
             return occ_pred, depth_pred
         return occ_pred, None
 
+    def downsample_gt(self, original_gt):
+        """Same as the occ_head.loss
+        """
 
-    def loss(self, ssc_pred, depth_pred, ssc_gt, depth_gt):
+        B = original_gt.shape[0]
+        gt = torch.zeros([B, self.volume_size[0], self.volume_size[1], self.volume_size[2]]).type(torch.float) 
+        gt += 17
+        for i in range(gt.shape[0]):
+            voxel_semantics_with_coords = torch.vstack([self.original_coords.T, original_gt[i].reshape(-1)]).T
+            voxel_semantics_with_coords = voxel_semantics_with_coords[voxel_semantics_with_coords[:, 3] < 17]
+            downsampled_coords = torch.div(voxel_semantics_with_coords[:, :3].long(), 2, rounding_mode='floor')
+            gt[i, downsampled_coords[:, 0], downsampled_coords[:, 1], downsampled_coords[:, 2]] = \
+                                                                                voxel_semantics_with_coords[:, 3]
+        return gt
+
+    def loss(self, ssc_pred, depth_pred, ssc_gt, depth_gt, mask_camera):
         """depth loss
-            depth_pred: shape (bs, N, 64, h, w)
+            ssc_pred: shape (B, D, W, H)
+            ssc_gt:
+            depth_pred: shape (bs, N, D, W, H)
             depth_gt: shape (N, H, W)
         """
         # TODO: only support batch_size=1 now
@@ -383,7 +404,9 @@ class BaseDepthNet(nn.Module):
             losses['depth_loss'] = loss
 
         # ssc loss
-        loss_sc = BCE_ssc_loss(ssc_pred, ssc_gt, self.class_weights_level_1, 0.54)
+        # ssc_pred = ssc_pred.permute(0, 1, 3, 2)
+        ssc_gt = self.downsample_gt(ssc_gt)
+        loss_sc = BCE_ssc_loss(ssc_pred, ssc_gt, 0.54, mask_camera)
         losses['loss_sc'] = loss_sc
 
         return losses

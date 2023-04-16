@@ -26,7 +26,7 @@ class LMSCNet_SS(nn.Module):
 		super().__init__()
 		self.out_scale=out_scale
 		self.nbr_classes = class_num
-		self.input_dimensions = input_dimensions # (D, W, H)
+		self.input_dimensions = input_dimensions # (D, W, H)->(100, 100, 8)
 		f = self.input_dimensions[2]
 
 		self.pool = nn.MaxPool2d(2)  # [F=2; S=2; P=0; D=1]
@@ -98,12 +98,12 @@ class LMSCNet_SS(nn.Module):
 
 	def foward(self, depth, img_metas):
 		"""
-		depth: voxel_featurs from depth net, shape (B, X, Y ,Z)->(1, 200, 200, 16)
+		depth: voxel_featurs from depth net, shape (B, D, H, W)->(1, 100, 8, 100)
 		"""
 
-		# input: (B, D, W, H)->(B, H, W, D)
+		# input: (B, H, W, D)
 		# output: (B, D, W, H)
-		input = depth.permute(0, 3, 2, 1)
+		input = depth.permute(0, 2, 3, 1)
 		
 		# Encoder block
 		_skip_1_1 = self.Encoder_block1(input)		# (1, 16, 200, 200)

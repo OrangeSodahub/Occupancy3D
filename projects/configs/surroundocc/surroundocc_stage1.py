@@ -34,17 +34,17 @@ model = dict(
     use_grid_mask=True,
     use_semantic=use_semantic,
     img_backbone=dict(
-       type='ResNet',
-       depth=101,
-       num_stages=4,
-       out_indices=(1,2,3),
-       frozen_stages=1,
-       norm_cfg=dict(type='BN2d', requires_grad=False),
-       norm_eval=True,
-       style='caffe',
-       #with_cp=True, # using checkpoint to save GPU memory
-       dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False), # original DCNv2 will print log when perform load_state_dict
-       stage_with_dcn=(False, False, True, True)),
+        type='ResNet',
+        depth=101,
+        num_stages=4,
+        out_indices=(1,2,3),
+        frozen_stages=1,
+        norm_cfg=dict(type='BN2d', requires_grad=False),
+        norm_eval=True,
+        style='caffe',
+        #with_cp=True, # using checkpoint to save GPU memory
+        dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False), # original DCNv2 will print log when perform load_state_dict
+        stage_with_dcn=(False, False, True, True)),
     img_neck=dict(
         type='FPN',
         in_channels=[512, 1024, 2048],
@@ -55,7 +55,8 @@ model = dict(
         relu_before_extra_convs=True),
     pts_backbone=dict(
         type='BaseDepthNet',
-        occ_size=occ_size, # (200, 200, 16)
+        occ_size=occ_size,       # (200, 200, 16)
+        volume_size=volume_size, # (100, 100, 8)
         pc_range=point_cloud_range,
         x_bound=[-40, 40, 0.4],
         y_bound=[-40, 40, 0.4],
@@ -69,7 +70,7 @@ model = dict(
         agg_voxel_mode='mean',
         ssc_net_conf=dict(
             class_num=2,
-            input_dimensions=occ_size, # (200, 200, 16)
+            input_dimensions=volume_size, # (100, 100, 8)
             out_scale="1_2")),
 )
 

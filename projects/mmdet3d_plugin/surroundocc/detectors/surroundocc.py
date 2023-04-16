@@ -113,7 +113,7 @@ class SurroundOcc(MVXTwoStageDetector):
             # TODO: for now only support single frame
             with_depgh_gt = (depth_gt is not None)
             ssc_pred, depth_pred = self.pts_backbone(pts_feats, img_metas, with_depgh_gt)
-            loss_inputs = [ssc_pred, depth_pred, voxel_semantics, depth_gt]
+            loss_inputs = [ssc_pred, depth_pred, voxel_semantics, depth_gt, mask_camera]
             losses_depth = self.pts_backbone.loss(*loss_inputs)
             losses.update(losses_depth)
 
