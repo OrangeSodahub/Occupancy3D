@@ -175,12 +175,11 @@ class OccEncoder(TransformerLayerSequence):
         reference_points_cam, volume_mask = self.point_sampling(
             ref_3d, self.pc_range, kwargs['img_metas'])
 
-        # NOTE: Just a test.
-        B, _, _, D = mask_gt.shape
-        num_cam = volume_mask.shape[0]
-        mask_gt = mask_gt.reshape(B, -1, D)
-        mask_gt = mask_gt[None].repeat(num_cam, 1, 1, 1)
-        volume_mask = (volume_mask & mask_gt)
+        if mask_gt is not None:
+            num_cam = volume_mask.shape[0]
+            mask_gt = mask_gt.reshape(mask_gt.shape[0], -1)
+            mask_gt = mask_gt[None, ..., None].repeat(num_cam, 1, 1, 1)
+            volume_mask = (volume_mask + mask_gt)
 
         # (num_query, bs, embed_dims) -> (bs, num_query, embed_dims)
         volume_query = volume_query.permute(1, 0, 2)

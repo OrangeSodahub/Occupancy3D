@@ -178,7 +178,7 @@ class SurroundOcc(MVXTwoStageDetector):
         
     def simple_test_pts(self, x, img_metas, rescale=False):
         """Test function"""
-        outs = self.pts_bbox_head(x, img_metas)
+        outs = self.pts_bbox_head(x, img_metas=img_metas)
 
         return outs
 
