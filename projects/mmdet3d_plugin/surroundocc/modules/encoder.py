@@ -51,7 +51,7 @@ class OccEncoder(TransformerLayerSequence):
         self.fp16_enabled = False
 
     @staticmethod
-    def get_reference_points(H, W, Z, bs=1, device='cuda', dtype=torch.float):
+    def get_reference_points(H, W, Z=8, dim='3d', bs=1, device='cuda', dtype=torch.float):
         """Get the reference points used in SCA and TSA.
         Args:
             H, W, Z: spatial shape of volume.
@@ -62,16 +62,30 @@ class OccEncoder(TransformerLayerSequence):
                 shape (bs, num_keys, num_levels, 2).
         """
         
-        zs = torch.linspace(0.5, Z - 0.5, Z, dtype=dtype,
-                            device=device).view(Z, 1, 1).expand(Z, H, W) / Z
-        xs = torch.linspace(0.5, W - 0.5, W, dtype=dtype,
-                            device=device).view(1, 1, W).expand(Z, H, W) / W
-        ys = torch.linspace(0.5, H - 0.5, H, dtype=dtype,
-                            device=device).view(1, H, 1).expand(Z, H, W) / H
-        ref_3d = torch.stack((xs, ys, zs), -1)
-        ref_3d = ref_3d.permute(3, 0, 1, 2).flatten(1).permute(1, 0)
-        ref_3d = ref_3d[None, None].repeat(bs, 1, 1, 1)
-        return ref_3d
+        if dim == '3d':
+            zs = torch.linspace(0.5, Z - 0.5, Z, dtype=dtype,
+                                device=device).view(Z, 1, 1).expand(Z, H, W) / Z
+            xs = torch.linspace(0.5, W - 0.5, W, dtype=dtype,
+                                device=device).view(1, 1, W).expand(Z, H, W) / W
+            ys = torch.linspace(0.5, H - 0.5, H, dtype=dtype,
+                                device=device).view(1, H, 1).expand(Z, H, W) / H
+            ref_3d = torch.stack((xs, ys, zs), -1)
+            ref_3d = ref_3d.permute(3, 0, 1, 2).flatten(1).permute(1, 0)
+            ref_3d = ref_3d[None, None].repeat(bs, 1, 1, 1)
+            return ref_3d
+
+        elif dim == '2d':
+            ref_y, ref_x = torch.meshgrid(
+                torch.linspace(
+                    0.5, H - 0.5, H, dtype=dtype, device=device),
+                torch.linspace(
+                    0.5, W - 0.5, W, dtype=dtype, device=device)
+            )
+            ref_y = ref_y.reshape(-1)[None] / H
+            ref_x = ref_x.reshape(-1)[None] / W
+            ref_2d = torch.stack((ref_x, ref_y), -1)
+            ref_2d = ref_2d.repeat(bs, 1, 1).unsqueeze(2)
+            return ref_2d
 
 
     # This function must use fp32!!!
@@ -142,6 +156,7 @@ class OccEncoder(TransformerLayerSequence):
                 key,
                 value,
                 *args,
+                volume_pos=None,
                 volume_h=None,
                 volume_w=None,
                 volume_z=None,
@@ -170,19 +185,28 @@ class OccEncoder(TransformerLayerSequence):
         intermediate = []
 
         ref_3d = self.get_reference_points(
-                    volume_h, volume_w, volume_z, bs=volume_query.size(1),  device=volume_query.device, dtype=volume_query.dtype)
+                    volume_h, volume_w, volume_z, dim='3d', bs=volume_query.size(1),  device=volume_query.device, dtype=volume_query.dtype)
+        ref_2d = self.get_reference_points(
+                    volume_h, volume_w, dim='2d', bs=volume_query.size(1), device=volume_query.device, dtype=volume_query.dtype)
+
+        bs, len_bev, num_bev_level, _ = ref_2d.shape
+        hybird_ref_2d = torch.stack([ref_2d, ref_2d], 1).reshape(bs*2, len_bev, num_bev_level, 2)
 
         reference_points_cam, volume_mask = self.point_sampling(
             ref_3d, self.pc_range, kwargs['img_metas'])
 
+        # apply the mask
         if mask_gt is not None:
             num_cam = volume_mask.shape[0]
             mask_gt = mask_gt.reshape(mask_gt.shape[0], -1)
             mask_gt = mask_gt[None, ..., None].repeat(num_cam, 1, 1, 1)
-            volume_mask = (volume_mask + mask_gt)
+            volume_mask = torch.logical_and(volume_mask, mask_gt)
 
         # (num_query, bs, embed_dims) -> (bs, num_query, embed_dims)
         volume_query = volume_query.permute(1, 0, 2)
+        # TODO: add positional encoding in cross attn
+        if volume_pos is not None:
+            volume_pos = volume_pos.permute(1, 0, 2)
 
         for lid, layer in enumerate(self.layers):
             output = layer(
@@ -191,6 +215,8 @@ class OccEncoder(TransformerLayerSequence):
                 value,
                 *args,
                 ref_3d=ref_3d,
+                ref_2d=hybird_ref_2d,
+                volume_pos=volume_pos,
                 volume_h=volume_h,
                 volume_w=volume_w,
                 volume_z=volume_z,
@@ -285,6 +311,8 @@ class OccLayer(MyCustomBaseTransformerLayer):
                 query_key_padding_mask=None,
                 key_padding_mask=None,
                 ref_3d=None,
+                ref_2d=None,
+                volume_pos=None,
                 volume_h=None,
                 volume_w=None,
                 volume_z=None,
@@ -376,11 +404,29 @@ class OccLayer(MyCustomBaseTransformerLayer):
                     **kwargs)
                 attn_index += 1
                 identity = query
+            
+            # spatial self attention
+            elif layer == 'self_attn':
+                query = self.attentions[attn_index](
+                    query,
+                    None,
+                    None,
+                    identity if self.pre_norm else None,
+                    query_pos=volume_pos,
+                    key_pos=volume_pos,
+                    attn_mask=attn_masks[attn_index],
+                    key_padding_mask=key_padding_mask,
+                    reference_points=ref_2d,
+                    spatial_shapes=torch.tensor(
+                        [[volume_h, volume_w]], device=query.device),
+                    level_start_index=torch.tensor([0], device=query.device),
+                    **kwargs)
+                attn_index += 1
+                identity = query
 
             elif layer == 'ffn':
                 query = self.ffns[ffn_index](
                     query, identity if self.pre_norm else None)
                 ffn_index += 1
             
-
         return query
