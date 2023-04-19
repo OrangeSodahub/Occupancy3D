@@ -95,7 +95,7 @@ class PerceptionTransformer(BaseModule):
         bs = mlvl_feats[0].size(0)
         # `volume_queries`: (H*W*Z, C) -> (H*W*Z, bs, C)
         volume_queries = volume_queries.unsqueeze(1).repeat(1, bs, 1)
-        unmasked_volume_queries = volume_queries[mask_gt.reshape(-1).bool(), ...]
+        unmasked_volume_queries = volume_queries[mask_gt.reshape(-1), ...]
 
         feat_flatten = []
         spatial_shapes = []
@@ -146,6 +146,8 @@ class PerceptionTransformer(BaseModule):
             volume_h,
             volume_w,
             volume_z,
+            pos_h,
+            pos_w,
             mask_gt,
             **kwargs):
 
@@ -161,6 +163,8 @@ class PerceptionTransformer(BaseModule):
                 volume_h=volume_h,
                 volume_w=volume_w,
                 volume_z=volume_z,
+                pos_h=pos_h,
+                pos_w=pos_w,
                 mask_gt=mask_gt,
                 **kwargs
             )

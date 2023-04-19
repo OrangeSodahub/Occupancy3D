@@ -33,6 +33,7 @@ class OccHead(nn.Module):
                  *args,
                  cross_transformer_template=None,
                  self_transformer_template=None,
+                 positonal_encoding_template=None,
                  num_classes=18,
                  volume_h=[100, 50, 25],
                  volume_w=[100, 50, 25],
@@ -51,7 +52,6 @@ class OccHead(nn.Module):
         self.conv_input = conv_input
         self.conv_output = conv_output
         
-        
         self.num_classes = num_classes
         self.volume_h = volume_h
         self.volume_w = volume_w
@@ -67,8 +67,10 @@ class OccHead(nn.Module):
         self.fpn_level = len(self.embed_dims)
         self.upsample_strides = upsample_strides
         self.out_indices = out_indices
+
         self.cross_transformer_template = cross_transformer_template
         self.self_transformer_template = self_transformer_template
+        self.positional_encoding_template = positonal_encoding_template
 
         self._init_layers()
 
@@ -79,42 +81,44 @@ class OccHead(nn.Module):
         for i in range(self.fpn_level):
             cross_transformer = copy.deepcopy(self.cross_transformer_template)
             self_transformer = copy.deepcopy(self.self_transformer_template)
-            positional_encoding = copy.deepcopy(self.positional_encoding)
+            positional_encoding = copy.deepcopy(self.positional_encoding_template)
+
             # `transformer.embed_dims = [128, 256, 512]`
             cross_transformer.embed_dims = self.cross_transformer_template.embed_dims[i]
-            self_transformer.embed_dims = self.self_transformer_template.embed_dims[i]
             # `num_points = _num_points_ = [2, 4, 8]`
             cross_transformer.encoder.transformerlayers.attn_cfgs[0].deformable_attention.num_points = \
                 self.cross_transformer_template.encoder.transformerlayers.attn_cfgs[0].deformable_attention.num_points[i]
-            self_transformer.encoder.transformerlayers.attn_cfgs[0].deformable_attention.num_points = \
-                self.self_transformer_template.encoder.transformerlayers.attn_cfgs[0].deformable_attention.num_points[i]
             # `feedforward_channels = _ffn_dim_ = [256, 512, 1204]`
             cross_transformer.encoder.transformerlayers.feedforward_channels = \
                 self.cross_transformer_template.encoder.transformerlayers.feedforward_channels[i]
-            self_transformer.encoder.transformerlayers.feedforward_channels = \
-                self.self_transformer_template.encoder.transformerlayers.feedforward_channels[i]
             # `transformer.embed_dims = [128, 256, 512]`
             cross_transformer.encoder.transformerlayers.embed_dims = \
                 self.cross_transformer_template.encoder.transformerlayers.embed_dims[i]
-            self_transformer.encoder.transformerlayers.embed_dims = \
-                self.self_transformer_template.encoder.transformerlayers.embed_dims[i]
             #`transformer.embed_dims = [128, 256, 512]`
             cross_transformer.encoder.transformerlayers.attn_cfgs[0].embed_dims = \
                 self.cross_transformer_template.encoder.transformerlayers.attn_cfgs[0].embed_dims[i]
-            self_transformer.encoder.transformerlayers.attn_cfgs[0].embed_dims = \
-                self.self_transformer_template.encoder.transformerlayers.attn_cfgs[0].embed_dims[i]
             #`transformer.embed_dims = [128, 256, 512]`
             cross_transformer.encoder.transformerlayers.attn_cfgs[0].deformable_attention.embed_dims = \
                 self.cross_transformer_template.encoder.transformerlayers.attn_cfgs[0].deformable_attention.embed_dims[i]
-            self_transformer.encoder.transformerlayers.attn_cfgs[0].deformable_attention.embed_dims = \
-                self.self_transformer_template.encoder.transformerlayers.attn_cfgs[0].deformable_attention.embed_dims[i]
             # `num_layers = _num_layers_ = [1, 3, 6]`
             cross_transformer.encoder.num_layers = self.cross_transformer_template.encoder.num_layers[i]
-            self_transformer.encoder.num_layers = self.self_transformer_template.encoder.num_layers[i]
 
-            positional_encoding.num_feats = self.positional_encoding.num_feats[i]
-            positional_encoding.row_num_embed = self.positional_encoding.row_num_embed[i]
-            positional_encoding.col_num_embed = self.positional_encoding.col_num_embed[i]
+            self_transformer.embed_dims = self.self_transformer_template.embed_dims[i]
+            self_transformer.encoder.transformerlayers.feedforward_channels = \
+                self.self_transformer_template.encoder.transformerlayers.feedforward_channels[i]
+            self_transformer.encoder.transformerlayers.embed_dims = \
+                self.self_transformer_template.encoder.transformerlayers.embed_dims[i]
+            self_transformer.encoder.num_layers = self.self_transformer_template.encoder.num_layers[i]
+            self_transformer.encoder.transformerlayers.attn_cfgs[0].embed_dims = \
+                self.self_transformer_template.encoder.transformerlayers.attn_cfgs[0].embed_dims[i]
+            self_transformer.encoder.transformerlayers.attn_cfgs[0].num_points = \
+                self.self_transformer_template.encoder.transformerlayers.attn_cfgs[0].num_points[i]
+
+            
+
+            positional_encoding.num_feats = self.positional_encoding_template.num_feats[i]
+            positional_encoding.row_num_embed = self.positional_encoding_template.row_num_embed[i]
+            positional_encoding.col_num_embed = self.positional_encoding_template.col_num_embed[i]
 
             cross_transformer_i = build_transformer(cross_transformer)
             self_transformer_i = build_transformer(self_transformer)
@@ -250,6 +254,8 @@ class OccHead(nn.Module):
         dtype = mlvl_feats[0].dtype
 
         volume_embed = []
+        pos_h = [200, 100, 50]
+        pos_w = [400, 100, 25]
 
         # fpn_level=3 (embeding_dims=[128, 256, 512])
         for i in range(self.fpn_level):
@@ -290,17 +296,20 @@ class OccHead(nn.Module):
             # Complete volume queries by adding mask tokens
             volume_embed_i_ = torch.empty((volume_h, volume_w, volume_z, self.embed_dims[i]), device=volume_queries.device)
             volume_embed_i_flatten = volume_embed_i_.reshape(-1, self.embed_dims[i])
-            volume_embed_i_flatten[mask_gt.reshape(-1), :] = volume_embed_i.reshape(-1)
-            volume_embed_i_flatten[~mask_gt.reshape(-1), :] = mask_queries.view(1, self.embed_dims[i]).expand(~mask_gt.sum(), self.embed_dims[i])
+            volume_embed_i_flatten[mask_gt.reshape(-1), :] = volume_embed_i
+            volume_embed_i_flatten[~mask_gt.reshape(-1), :] = mask_queries.view(1, self.embed_dims[i]).expand((~mask_gt).sum(), self.embed_dims[i])
 
             # self attention
-            volume_pos_self_attn = self.positional_encoding(torch.zeros((bs, volume_h, volume_w), device=volume_queries.device)).to(dtype)
-            volume_embed_i = self.self_transformer.diffuse_volume_features[i](
+            volume_pos_self_attn = self.positional_encoding[i](torch.zeros((bs, pos_h[i], pos_w[i]), device=volume_queries.device)).to(dtype)
+            volume_embed_i = self.self_transformer[i].diffuse_volume_features(
                 [view_features],
                 volume_embed_i_flatten,
                 volume_pos=volume_pos_self_attn,
                 volume_h=volume_h,
                 volume_w=volume_w,
+                volume_z=volume_z,
+                pos_h=pos_h[i],
+                pos_w=pos_w[i],
                 mask_gt=mask_gt,
                 img_metas=img_metas
             )

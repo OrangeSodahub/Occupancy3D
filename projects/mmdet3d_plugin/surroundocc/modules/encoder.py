@@ -160,6 +160,8 @@ class OccEncoder(TransformerLayerSequence):
                 volume_h=None,
                 volume_w=None,
                 volume_z=None,
+                pos_h=None,
+                pos_w=None,
                 mask_gt=None,
                 spatial_shapes=None,
                 level_start_index=None,
@@ -184,23 +186,28 @@ class OccEncoder(TransformerLayerSequence):
         output = volume_query
         intermediate = []
 
-        ref_3d = self.get_reference_points(
-                    volume_h, volume_w, volume_z, dim='3d', bs=volume_query.size(1),  device=volume_query.device, dtype=volume_query.dtype)
-        ref_2d = self.get_reference_points(
-                    volume_h, volume_w, dim='2d', bs=volume_query.size(1), device=volume_query.device, dtype=volume_query.dtype)
+        ref_3d = None
+        hybird_ref_2d = None
+        volume_mask = None
+        reference_points_cam = None
 
-        bs, len_bev, num_bev_level, _ = ref_2d.shape
-        hybird_ref_2d = torch.stack([ref_2d, ref_2d], 1).reshape(bs*2, len_bev, num_bev_level, 2)
+        # get 3d reference points
+        if volume_z is not None:
+            ref_3d = self.get_reference_points(
+                        volume_h, volume_w, volume_z, dim='3d', bs=volume_query.size(1),  device=volume_query.device, dtype=volume_query.dtype)
+            if mask_gt is not None:
+                ref_3d = ref_3d[:, :, mask_gt.reshape(-1), :]
 
-        reference_points_cam, volume_mask = self.point_sampling(
-            ref_3d, self.pc_range, kwargs['img_metas'])
+            reference_points_cam, volume_mask = self.point_sampling(
+                ref_3d, self.pc_range, kwargs['img_metas'])
 
-        # apply the mask
-        if mask_gt is not None:
-            num_cam = volume_mask.shape[0]
-            mask_gt = mask_gt.reshape(mask_gt.shape[0], -1)
-            mask_gt = mask_gt[None, ..., None].repeat(num_cam, 1, 1, 1)
-            volume_mask = torch.logical_and(volume_mask, mask_gt)
+        # get 2d reference points
+        if (pos_h and pos_w) is not None:
+            ref_2d = self.get_reference_points(
+                        pos_h, pos_w, dim='2d', bs=volume_query.size(1), device=volume_query.device, dtype=volume_query.dtype)
+
+            bs, len_bev, num_bev_level, _ = ref_2d.shape
+            hybird_ref_2d = torch.stack([ref_2d, ref_2d], 1).reshape(bs*2, len_bev, num_bev_level, 2)
 
         # (num_query, bs, embed_dims) -> (bs, num_query, embed_dims)
         volume_query = volume_query.permute(1, 0, 2)
@@ -220,6 +227,8 @@ class OccEncoder(TransformerLayerSequence):
                 volume_h=volume_h,
                 volume_w=volume_w,
                 volume_z=volume_z,
+                pos_h=pos_h,
+                pos_w=pos_w,
                 spatial_shapes=spatial_shapes,
                 level_start_index=level_start_index,
                 reference_points_cam=reference_points_cam,
@@ -316,6 +325,8 @@ class OccLayer(MyCustomBaseTransformerLayer):
                 volume_h=None,
                 volume_w=None,
                 volume_z=None,
+                pos_h=None,
+                pos_w=None,
                 reference_points_cam=None,
                 mask=None,
                 spatial_shapes=None,
@@ -418,7 +429,7 @@ class OccLayer(MyCustomBaseTransformerLayer):
                     key_padding_mask=key_padding_mask,
                     reference_points=ref_2d,
                     spatial_shapes=torch.tensor(
-                        [[volume_h, volume_w]], device=query.device),
+                        [[pos_h, pos_w]], device=query.device),
                     level_start_index=torch.tensor([0], device=query.device),
                     **kwargs)
                 attn_index += 1
