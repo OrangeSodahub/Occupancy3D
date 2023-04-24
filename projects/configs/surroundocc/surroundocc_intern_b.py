@@ -34,30 +34,33 @@ volume_w_ = [100, 50, 25]
 volume_z_ = [8, 4, 2]
 _num_points_ = [2, 4, 8]
 _num_layers_ = [1, 3, 6]
-pretrained = 'https://huggingface.co/OpenGVLab/InternImage/resolve/main/internimage_b_1k_224.pth'
+pretrained = 'https://huggingface.co/OpenGVLab/InternImage/resolve/main/mask_rcnn_internimage_s_fpn_3x_coco.pth'
+# Set to True will casue RuntimeError
+find_unused_parameters = False
 
 model = dict(
     type='SurroundOcc',
     use_grid_mask=True,
     use_semantic=use_semantic,
     img_backbone=dict(
-       type='InternImage',
-       corp_op='DCNv3',
-       channels=80,
-       depths=[4, 4, 21, 4],
-       groups=[7, 14, 28, 56],
-       mlp_ratio=4.,
-       drop_path_rate=0.3,
-       norm_layer='LN',
-       layer_scale=1.0,
-       offset_scale=1.0,
-       post_norm=True,
-       with_cp=True,
-       out_indices=(1, 2, 3),
-       init_cfg=dict(type='Pretrained', checkpoint=pretrained)),
+        _delete_=True,
+        type='InternImage',
+        corp_op='DCNv3',
+        channels=80,
+        depths=[4, 4, 21, 4],
+        groups=[5, 10, 20, 40],
+        mlp_ratio=4.,
+        drop_path_rate=0.3,
+        norm_layer='LN',
+        layer_scale=1.0,
+        offset_scale=1.0,
+        post_norm=True,
+        with_cp=True,
+        out_indices=(1, 2, 3),
+        init_cfg=dict(type='Pretrained', checkpoint=pretrained)),
     img_neck=dict(
         type='FPN',
-        in_channels=[512, 1024, 2048],
+        in_channels=[160, 320, 640],
         out_channels=512,
         start_level=0,
         add_extra_convs='on_output',
@@ -134,7 +137,6 @@ test_pipeline = [
     dict(type='CustomCollect3D', keys=[ 'img'])
 ]
 
-find_unused_parameters = True
 data = dict(
     samples_per_gpu=1,
     workers_per_gpu=4,
