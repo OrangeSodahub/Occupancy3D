@@ -411,7 +411,8 @@ def main(nusc, val_list, indice, nuscenesyaml, args, config):
         scene_semantic_points = lidar_to_ego(scene_semantic_points, lidar_calibrated_sensor)
 
         ################## remain points with a spatial range ##############
-        mask = (np.abs(scene_points[:, 0]) < 40.0) & (np.abs(scene_points[:, 1]) < 40.0) \
+        # NOTE: Attention this step, the range will drastically affect the result
+        mask = (np.abs(scene_points[:, 0]) < 100.0) & (np.abs(scene_points[:, 1]) < 100.0) \
                & (scene_points[:, 2] > -1.0) & (scene_points[:, 2] < 5.4)
         scene_points = scene_points[mask]
 
