@@ -137,6 +137,16 @@ def lidar_to_world_to_lidar(
     return pc
 
 
+def lidar_to_ego(pc, lidar_calibrated_sensor):
+    pc = LidarPointCloud(pc.T)
+
+    # 1. Transform the pointcloud to the ego vehicle frame for the timestamp of the sweep.
+    pc.rotate(Quaternion(lidar_calibrated_sensor['rotation']).rotation_matrix)
+    pc.translate(np.array(lidar_calibrated_sensor['translation']))
+
+    return pc
+
+
 def main(nusc, val_list, indice, nuscenesyaml, args, config):
 
     save_path = args.save_path
@@ -216,7 +226,7 @@ def main(nusc, val_list, indice, nuscenesyaml, args, config):
         object_points_list = []
         j = 0
         while j < points_in_boxes.shape[-1]:
-            object_points_mask = points_in_boxes[0][:,j].bool()
+            object_points_mask = points_in_boxes[0][:, j].bool()
             object_points = pc0[object_points_mask]
             object_points_list.append(object_points)
             j = j + 1
@@ -316,12 +326,10 @@ def main(nusc, val_list, indice, nuscenesyaml, args, config):
         object_points_dict[query_object_token] = np.concatenate(object_points_dict[query_object_token],
                                                                 axis=0)
 
-
     object_points_vertice = []
     for key in object_points_dict.keys():
         point_cloud = object_points_dict[key]
-        object_points_vertice.append(point_cloud[:,:3])
-    # print('object finish')
+        object_points_vertice.append(point_cloud[:, :3])
 
     i = 0
     while int(i) < 10000:  # Assuming the sequence does not have more than 10000 frames
@@ -374,12 +382,15 @@ def main(nusc, val_list, indice, nuscenesyaml, args, config):
                     points = rotated_object_points + locs[j]
                     if points.shape[0] >= 5:
                         points_in_boxes = points_in_boxes_cpu(torch.from_numpy(points[:, :3][np.newaxis, :, :]),
-                                                              torch.from_numpy(gt_bbox_3d[j:j+1][np.newaxis, :]))
-                        points = points[points_in_boxes[0,:,0].bool()]
+                                                              torch.from_numpy(gt_bbox_3d[j : j+1][np.newaxis, :]))
+                        points = points[points_in_boxes[0, :, 0].bool()]
 
+                    points = lidar_to_ego(points, lidar_calibrated_sensor.copy())
                     object_points_list.append(points)
-                    semantics = np.ones_like(points[:,0:1]) * object_semantic[k]
-                    object_semantic_list.append(np.concatenate([points[:, :3], semantics], axis=1))
+                    semantics = np.ones_like(points[:, 0:1]) * object_semantic[k]
+                    object_semantics = np.concatenate([points[:, :3], semantics], axis=1)
+                    object_semantics = lidar_to_ego(object_semantics, lidar_calibrated_sensor.copy())
+                    object_semantic_list.append(object_semantics)
 
         try: # avoid concatenate an empty array
             temp = np.concatenate(object_points_list)

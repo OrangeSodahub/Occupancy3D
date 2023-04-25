@@ -85,7 +85,7 @@ def draw(
 
 
 if __name__ == '__main__':
-    occ_path = './data/n015-2018-07-18-11-07-57+0800__LIDAR_TOP__1531883531950107.pcd.bin.npy'
+    occ_path = './data/n015-2018-07-18-11-07-57+0800__LIDAR_TOP__1531883541548949.pcd.bin.npy'
     occ = np.load(open(occ_path, "rb"))
     ratio = 1
     draw(occ, ratio=ratio)
