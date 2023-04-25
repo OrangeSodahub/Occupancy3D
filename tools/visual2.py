@@ -30,8 +30,8 @@ colors = np.array(
 
 def draw(
     voxels,                         # semantic occupancy predictions
-    resolution=[0.5, 0.5, 0.5],
-    voxel_origin=[-50, -50, -1],
+    resolution=[0.4, 0.4, 0.4],
+    voxel_origin=[-40, -40, -1],
     ratio=1,                        # scale
 ):
     coords = voxels[:, :3] // ratio
@@ -62,7 +62,7 @@ def draw(
         fov_voxels[:, 2],
         fov_voxels[:, 3],
         colormap="viridis",
-        scale_factor=0.95 * 0.5,
+        scale_factor=0.95 * 0.4,
         mode="cube",
         opacity=1.0,
         vmin=1,
@@ -85,7 +85,7 @@ def draw(
 
 
 if __name__ == '__main__':
-    occ_path = './data/n015-2018-07-18-11-07-57+0800__LIDAR_TOP__1531883541548949.pcd.bin.npy'
+    occ_path = './data/n015-2018-07-18-11-07-57+0800__LIDAR_TOP__1531883530949817.pcd.bin.npy'
     occ = np.load(open(occ_path, "rb"))
     ratio = 1
     draw(occ, ratio=ratio)

@@ -138,13 +138,16 @@ def lidar_to_world_to_lidar(
 
 
 def lidar_to_ego(pc, lidar_calibrated_sensor):
-    pc = LidarPointCloud(pc.T)
+    pc = pc.T
 
-    # 1. Transform the pointcloud to the ego vehicle frame for the timestamp of the sweep.
-    pc.rotate(Quaternion(lidar_calibrated_sensor['rotation']).rotation_matrix)
-    pc.translate(np.array(lidar_calibrated_sensor['translation']))
+    # Transform the pointcloud to the ego vehicle frame for the timestamp of the sweep.
+    rot_matrix = Quaternion(lidar_calibrated_sensor['rotation']).rotation_matrix
+    translation_matrix = np.array(lidar_calibrated_sensor['translation'])
+    pc[:3, :] = np.dot(rot_matrix, pc[:3, :])
+    for i in range(3):
+        pc[i, :] = pc[i, :] + translation_matrix[i]
 
-    return pc
+    return pc.T
 
 
 def main(nusc, val_list, indice, nuscenesyaml, args, config):
@@ -353,7 +356,7 @@ def main(nusc, val_list, indice, nuscenesyaml, args, config):
                                                       lidar_calibrated_sensor0.copy(),
                                                       lidar_ego_pose0.copy(),
                                                       lidar_ego_pose)
-        point_cloud = lidar_pc_i.points.T[:,:3]
+        point_cloud = lidar_pc_i.points.T[:, :3]
         point_cloud_with_semantic = lidar_pc_i_semantic.points.T
 
         ################## load bbox of target frame ##############
@@ -385,11 +388,9 @@ def main(nusc, val_list, indice, nuscenesyaml, args, config):
                                                               torch.from_numpy(gt_bbox_3d[j : j+1][np.newaxis, :]))
                         points = points[points_in_boxes[0, :, 0].bool()]
 
-                    points = lidar_to_ego(points, lidar_calibrated_sensor.copy())
                     object_points_list.append(points)
                     semantics = np.ones_like(points[:, 0:1]) * object_semantic[k]
                     object_semantics = np.concatenate([points[:, :3], semantics], axis=1)
-                    object_semantics = lidar_to_ego(object_semantics, lidar_calibrated_sensor.copy())
                     object_semantic_list.append(object_semantics)
 
         try: # avoid concatenate an empty array
@@ -402,6 +403,10 @@ def main(nusc, val_list, indice, nuscenesyaml, args, config):
             scene_semantic_points = np.concatenate([point_cloud_with_semantic, temp])
         except:
             scene_semantic_points = point_cloud_with_semantic
+
+        ################## transform to the ego coordinate system ##############
+        scene_points = lidar_to_ego(scene_points, lidar_calibrated_sensor)
+        scene_semantic_points = lidar_to_ego(scene_semantic_points, lidar_calibrated_sensor)
 
         ################## remain points with a spatial range ##############
         mask = (np.abs(scene_points[:, 0]) < 40.0) & (np.abs(scene_points[:, 1]) < 40.0) \
