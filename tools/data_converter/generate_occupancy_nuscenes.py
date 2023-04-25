@@ -107,24 +107,32 @@ def nn_correspondance(verts1, verts2):
     return indices, distances
 
 
-def lidar_to_ego(pc, lidar_calibrated_sensor):
+def lidar_to_world_to_lidar(
+        pc,
+        lidar_calibrated_sensor,
+        lidar_ego_pose,
+        cam_ego_pose,
+        cam_calibrated_sensor=None,
+        ):
 
     pc = LidarPointCloud(pc.T)
 
-    # Transform the pointcloud to the ego vehicle frame for the timestamp of the sweep.
+    # 1. Transform the pointcloud to the ego vehicle frame for the timestamp of the sweep.
     pc.rotate(Quaternion(lidar_calibrated_sensor['rotation']).rotation_matrix)
     pc.translate(np.array(lidar_calibrated_sensor['translation']))
 
-    return pc
+    # 2. Transform from ego to global frame.
+    pc.rotate(Quaternion(lidar_ego_pose['rotation']).rotation_matrix)
+    pc.translate(np.array(lidar_ego_pose['translation']))
 
+    # 3. Transform from global into ego vehicle frame for the timestamp of the image.
+    pc.translate(-np.array(cam_ego_pose['translation']))
+    pc.rotate(Quaternion(cam_ego_pose['rotation']).rotation_matrix.T)
 
-def ego_to_lidar(pc, lidar_calibrated_sensor):
-
-    pc = LidarPointCloud(pc.T)
-
-    # Transform the pointcloud to the lidar vehicle frame for the timestamp of the sweep.
-    pc.translate(-np.array(lidar_calibrated_sensor['translation']))
-    pc.rotate(Quaternion(lidar_calibrated_sensor['rotation']).rotation_matrix.T)
+    if cam_calibrated_sensor is not None:
+        # 4. Transform from ego into the camera frame for the timestamp of the image.
+        pc.translate(-np.array(cam_calibrated_sensor['translation']))
+        pc.rotate(Quaternion(cam_calibrated_sensor['rotation']).rotation_matrix.T)
 
     return pc
 
@@ -156,6 +164,8 @@ def main(nusc, val_list, indice, nuscenesyaml, args, config):
     first_sample_token = my_scene['first_sample_token']
     my_sample = nusc.get('sample', first_sample_token)
     lidar_data = nusc.get('sample_data', my_sample['data'][sensor])
+    lidar_ego_pose0 = nusc.get('ego_pose', lidar_data['ego_pose_token'])
+    lidar_calibrated_sensor0 = nusc.get('calibrated_sensor', lidar_data['calibrated_sensor_token'])
 
     # collect LiDAR sequence
     dict_list = []
@@ -228,7 +238,11 @@ def main(nusc, val_list, indice, nuscenesyaml, args, config):
         ################## coordinate conversion to the EGO coordinate  ##################
         lidar_ego_pose = nusc.get('ego_pose', lidar_data['ego_pose_token'])
         lidar_calibrated_sensor = nusc.get('calibrated_sensor', lidar_data['calibrated_sensor_token'])
-        lidar_pc = lidar_to_ego(pc.copy(), lidar_calibrated_sensor.copy())
+        lidar_pc = lidar_to_world_to_lidar(pc.copy(),
+                                           lidar_calibrated_sensor.copy(),
+                                           lidar_ego_pose.copy(),
+                                           lidar_ego_pose0,
+                                           lidar_calibrated_sensor0)
 
         ################## record Non-key frame information into a dict  ########################
         dict = {"object_tokens": object_tokens,
@@ -245,7 +259,11 @@ def main(nusc, val_list, indice, nuscenesyaml, args, config):
         ################## record semantic information into the dict if it's a key frame  ########################
         if lidar_data['is_key_frame']:
             pc_with_semantic = pc_with_semantic[points_mask]
-            lidar_pc_with_semantic = lidar_to_ego(pc_with_semantic.copy(), lidar_calibrated_sensor.copy())
+            lidar_pc_with_semantic = lidar_to_world_to_lidar(pc_with_semantic.copy(),
+                                                             lidar_calibrated_sensor.copy(),
+                                                             lidar_ego_pose.copy(),
+                                                             lidar_ego_pose0,
+                                                             lidar_calibrated_sensor0)
             dict["lidar_pc_with_semantic"] = lidar_pc_with_semantic.points
         dict_list.append(dict)
 
@@ -298,10 +316,12 @@ def main(nusc, val_list, indice, nuscenesyaml, args, config):
         object_points_dict[query_object_token] = np.concatenate(object_points_dict[query_object_token],
                                                                 axis=0)
 
+
     object_points_vertice = []
     for key in object_points_dict.keys():
         point_cloud = object_points_dict[key]
         object_points_vertice.append(point_cloud[:,:3])
+    # print('object finish')
 
     i = 0
     while int(i) < 10000:  # Assuming the sequence does not have more than 10000 frames
@@ -317,8 +337,14 @@ def main(nusc, val_list, indice, nuscenesyaml, args, config):
         ################## convert the static scene to the target coordinate system ##############
         lidar_calibrated_sensor = dict['lidar_calibrated_sensor']
         lidar_ego_pose = dict['lidar_ego_pose']
-        lidar_pc_i = ego_to_lidar(lidar_pc.copy(), lidar_calibrated_sensor)
-        lidar_pc_i_semantic = ego_to_lidar(lidar_pc_with_semantic.copy(), lidar_calibrated_sensor)
+        lidar_pc_i = lidar_to_world_to_lidar(lidar_pc.copy(),
+                                             lidar_calibrated_sensor0.copy(),
+                                             lidar_ego_pose0.copy(),
+                                             lidar_ego_pose)
+        lidar_pc_i_semantic = lidar_to_world_to_lidar(lidar_pc_with_semantic.copy(),
+                                                      lidar_calibrated_sensor0.copy(),
+                                                      lidar_ego_pose0.copy(),
+                                                      lidar_ego_pose)
         point_cloud = lidar_pc_i.points.T[:,:3]
         point_cloud_with_semantic = lidar_pc_i_semantic.points.T
 
