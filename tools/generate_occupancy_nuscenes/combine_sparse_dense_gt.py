@@ -216,13 +216,14 @@ if __name__ == '__main__':
     parser.add_argument('--dense_occ_root', type=str, default='./data/dense_occ/', help='dense occupancy path')
     parser.add_argument('--sparse_occ_root', type=str, default='./data/sparse_occ/', help='sparse occupancy path')
     parser.add_argument('--save_root', type=str, default='./data/new_occ/', help='save path')
-    parser.add_argument('--train_pkl', type=str, default='./data/occ_nus/occ_infos_temporal_train.pkl', help='train pkl')
-    parser.add_argument('--val_pkl', type=str, default='./data/occ_nus/occ_infos_temporal_val.pkl', help='val pkl')
+    parser.add_argument('--train_pkl', type=str, default='./data/occ3d_nus/occ_infos_temporal_train.pkl', help='train pkl')
+    parser.add_argument('--val_pkl', type=str, default='./data/occ3d_nus/occ_infos_temporal_val.pkl', help='val pkl')
     parser.add_argument('--draw', action='store_true', help='draw the occupancy')
     args = parser.parse_args()
     
     if args.version == 'OpenOcc':
         # NOTE: not implemented yet
+        raise NotImplementedError
         dense_occ_path = './69b793ec8dc44e2fbd33d8cdd16b5a31.npy'
 
     elif args.version == 'SurrOcc':
