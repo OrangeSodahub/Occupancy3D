@@ -1,5 +1,6 @@
 import numpy as np
 from mayavi import mlab
+from collections import Counter
 # mlab.options.offscreen = True
 print("Set mlab.options.offscreen={}".format(mlab.options.offscreen))
 
@@ -28,16 +29,41 @@ colors = np.array(
 ).astype(np.uint8)
 
 
+def downsample(voxels):
+    def sample(voxel):
+        voxel = voxel.flatten()
+        voxel = voxel[voxel != 0]
+        if len(voxel) == 0:
+            return 0
+        c = Counter(voxel)
+        return c.most_common(1)[0][0]
+    
+    new_voxels = np.zeros([200, 200, 20])
+    for x in range(0, 400, 2):
+        for y in  range(0, 400, 2):
+            for z in range(0, 40, 2):
+                new_voxels[x // 2, y // 2, z // 2] = sample(voxels[x:x+2, y:y+2, z:z+2])
+
+    return new_voxels
+
+
 def draw(
     voxels,                         # semantic occupancy predictions
     resolution=[0.4, 0.4, 0.4],
     voxel_origin=[-40, -40, -1],
     ratio=1,                        # scale
+    version=None,
 ):
     coords = voxels[:, :3] // ratio
     # Compute the voxels coordinates
-    grid_coords = np.zeros([200 // ratio, 200 // ratio, 16 // ratio])
-    grid_coords[coords[:, 0], coords[:, 1], coords[:, 2]] = voxels[:, 3]
+    if version == 'OpenOcc':
+        grid_coords = np.zeros([512 // ratio, 512 // ratio, 40 // ratio])
+        grid_coords[coords[:, 1], coords[:, 2], coords[:, 0]] = voxels[:, 3]
+        grid_coords = grid_coords[56:456, 56:456, :]
+        grid_coords = downsample(grid_coords)
+    else:
+        grid_coords = np.zeros([200 // ratio, 200 // ratio, 16 // ratio])
+        grid_coords[coords[:, 0], coords[:, 1], coords[:, 2]] = voxels[:, 3]
 
     # Obtaining the coords_grid
     g_xx = np.arange(0, 200 // ratio) # [0, 1, ..., 199]
