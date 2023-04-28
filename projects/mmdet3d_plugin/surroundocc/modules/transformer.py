@@ -64,7 +64,6 @@ class PerceptionTransformer(BaseModule):
             self.num_feature_levels, self.embed_dims))
         self.cams_embeds = nn.Parameter(
             torch.Tensor(self.num_cams, self.embed_dims))
-        self.reference_points = nn.Linear(self.embed_dims, 3)
 
     def init_weights(self):
         """Initialize the transformer weights."""
@@ -79,7 +78,6 @@ class PerceptionTransformer(BaseModule):
                     m.init_weights()
         normal_(self.level_embeds)
         normal_(self.cams_embeds)
-        xavier_init(self.reference_points, distribution='uniform', bias=0.)
 
     @auto_fp16(apply_to=('mlvl_feats', 'volume_queries'))
     def forward(
