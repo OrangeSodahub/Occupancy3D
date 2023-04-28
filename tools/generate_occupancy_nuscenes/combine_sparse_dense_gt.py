@@ -6,8 +6,11 @@ import pickle
 import argparse
 import numpy as np
 from tqdm import tqdm
-from mayavi import mlab
 from collections import Counter
+try:
+    from mayavi import mlab
+except:
+    print("Mayavi is not installed. Please install it if you want to visualize the results.")
 
 
 colors = np.array(
@@ -212,12 +215,12 @@ def downsample(voxels):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--version', type=str, default='OpenOcc', help='OpenOcc or SurrOcc')
-    parser.add_argument('--dense_occ_root', type=str, default='./data/dense_occ/', help='dense occupancy path')
-    parser.add_argument('--sparse_occ_root', type=str, default='./data/sparse_occ/', help='sparse occupancy path')
-    parser.add_argument('--save_root', type=str, default='./data/new_occ/', help='save path')
-    parser.add_argument('--train_pkl', type=str, default='./data/occ3d_nus/occ_infos_temporal_train.pkl', help='train pkl')
-    parser.add_argument('--val_pkl', type=str, default='./data/occ3d_nus/occ_infos_temporal_val.pkl', help='val pkl')
+    parser.add_argument('--version', type=str, default='SurrOcc', help='OpenOcc or SurrOcc')
+    parser.add_argument('--dense_occ_root', type=str, default='../../data/dense_occ/', help='dense occupancy path')
+    parser.add_argument('--sparse_occ_root', type=str, default='../../data/sparse_occ/', help='sparse occupancy path')
+    parser.add_argument('--save_root', type=str, default='../../data/new_occ/', help='save path')
+    parser.add_argument('--train_pkl', type=str, default='../../data/occ3d_nus/occ_infos_temporal_train.pkl', help='train pkl')
+    parser.add_argument('--val_pkl', type=str, default='../../data/occ3d_nus/occ_infos_temporal_val.pkl', help='val pkl')
     parser.add_argument('--draw', action='store_true', help='draw the occupancy')
     args = parser.parse_args()
     
@@ -227,9 +230,9 @@ if __name__ == '__main__':
         dense_occ_path = './69b793ec8dc44e2fbd33d8cdd16b5a31.npy'
 
     elif args.version == 'SurrOcc':
-        for pkl, split in args.train_pkl, args.val_pkl:
+        for pkl in [args.train_pkl, args.val_pkl]:
             print(f'====> Load {pkl}')
-            infos = pickle.load(open(args.train_pkl, 'rb'))
+            infos = pickle.load(open(pkl, 'rb'))['infos']
             dense_occ_names = os.listdir(args.dense_occ_root)
             timestamps = [int(dense_occ_name.split('__')[-1].split('.')[0]) for dense_occ_name in dense_occ_names]
             dense_occ_map = dict(zip(timestamps, dense_occ_names))
