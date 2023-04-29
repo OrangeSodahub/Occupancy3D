@@ -9,8 +9,9 @@ import mmdet3d
 import numpy as np
 import time, yaml, os
 
-from mmcv.runner import force_fp32, auto_fp16
+from mmcv.runner import auto_fp16
 from mmdet.models import DETECTORS
+from mmdet3d.models import builder
 from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
 from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 
@@ -18,6 +19,7 @@ from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 @DETECTORS.register_module()
 class SurroundOcc(MVXTwoStageDetector):
     def __init__(self,
+                 with_points=False,
                  use_grid_mask=False,
                  pts_voxel_layer=None,
                  pts_voxel_encoder=None,
@@ -28,6 +30,9 @@ class SurroundOcc(MVXTwoStageDetector):
                  img_neck=None,
                  pts_neck=None,
                  pts_bbox_head=None,
+                 occ_fuser=None,
+                 occ_encoder_backbone=None,
+                 occ_encoder_neck=None,
                  img_roi_head=None,
                  img_rpn_head=None,
                  train_cfg=None,
@@ -35,7 +40,6 @@ class SurroundOcc(MVXTwoStageDetector):
                  pretrained=None,
                  use_semantic=True,
                  is_vis=False,
-                 version='v1',
                  ):
 
         super(SurroundOcc,
@@ -49,11 +53,14 @@ class SurroundOcc(MVXTwoStageDetector):
         self.use_grid_mask = use_grid_mask
         self.fp16_enabled = False
 
+        self.occ_fuser = builder.build_fusion_layer(occ_fuser) if occ_fuser is not None else None
+        self.occ_encoder_backbone = builder.build_backbone(occ_encoder_backbone) if occ_encoder_backbone is not None else None
+        self.occ_encoder_neck = builder.build_neck(occ_encoder_neck) if occ_encoder_neck is not None else None
+
+        self.with_points = with_points
         self.use_semantic = use_semantic
         self.is_vis = is_vis
                   
-
-
     def extract_img_feat(self, img, img_metas, len_queue=None):
         """Extract features of images."""
         B = img.size(0)
@@ -88,23 +95,42 @@ class SurroundOcc(MVXTwoStageDetector):
                 img_feats_reshaped.append(img_feat.view(B, int(BN / B), C, H, W))
         return img_feats_reshaped
 
+    def extract_pts_feat(self, points):
+        """Extract features of points."""
+        voxels, num_points, coors = self.voxelize(points)
+        voxel_features = self.pts_voxel_encoder(voxels, num_points, coors)
+        batch_size = coors[-1, 0] + 1
+        pts_feats = self.pts_middle_encoder(voxel_features, coors, batch_size)
+        return pts_feats
+
     @auto_fp16(apply_to=('img'))
-    def extract_feat(self, img, img_metas=None, len_queue=None):
+    def extract_feat(self, img, img_metas=None, points=None, len_queue=None):
         """Extract features from images and points."""
 
+        # extract features of images
         img_feats = self.extract_img_feat(img, img_metas, len_queue=len_queue)
-        
-        return img_feats
 
+        voxel_pts_feats = None
+        # extract features of points
+        if self.with_points:
+            assert points is not None
+            voxel_pts_feats = self.extract_pts_feat(points)
+
+        return img_feats, voxel_pts_feats
 
     def forward_pts_train(self,
-                          pts_feats,
+                          img_feats,
+                          voxel_pts_feats,
                           voxel_semantics,
                           mask_camera,
                           img_metas):
-
+        feature_fuse = dict(
+            occ_fuser=self.occ_fuser,
+            occ_encoder_backbone=self.occ_encoder_backbone,
+            occ_encoder_neck=self.occ_encoder_neck,
+        )
         outs = self.pts_bbox_head(
-            pts_feats, img_metas)
+            img_feats, img_metas, voxel_pts_feats, feature_fuse)
         # `voxel_semantics` only used in loss calculation
         # with multi-scale supervision
         loss_inputs = [voxel_semantics, mask_camera, outs]
@@ -131,21 +157,21 @@ class SurroundOcc(MVXTwoStageDetector):
             return self.forward_train(**kwargs)
         else:
             return self.forward_test(**kwargs)
-    
 
     @auto_fp16(apply_to=('img', 'points'))
     def forward_train(self,
                       img_metas=None,
                       img=None,
+                      points=None,
                       voxel_semantics=None,
                       mask_lidar=None,
                       mask_camera=None,
                       ):
 
-        img_feats = self.extract_feat(img=img, img_metas=img_metas)
+        img_feats, voxel_pts_feats = self.extract_feat(img=img, img_metas=img_metas, points=points)
         losses = dict()
-        losses_pts = self.forward_pts_train(img_feats, voxel_semantics, mask_camera,
-                                             img_metas)
+        losses_pts = self.forward_pts_train(img_feats, voxel_pts_feats,
+                                            voxel_semantics, mask_camera, img_metas)
 
         losses.update(losses_pts)
         return losses

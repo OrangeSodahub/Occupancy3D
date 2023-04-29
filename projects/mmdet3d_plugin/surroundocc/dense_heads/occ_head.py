@@ -49,7 +49,6 @@ class OccHead(nn.Module):
         self.conv_input = conv_input
         self.conv_output = conv_output
         
-        
         self.num_classes = num_classes
         self.volume_h = volume_h
         self.volume_w = volume_w
@@ -59,8 +58,8 @@ class OccHead(nn.Module):
         self.img_channels = img_channels
 
         self.use_mask = use_mask
-        self.use_semantic = use_semantic
         self.embed_dims = embed_dims
+        self.lambda_xm = 0.1
 
         self.fpn_level = len(self.embed_dims)
         self.upsample_strides = upsample_strides
@@ -104,8 +103,6 @@ class OccHead(nn.Module):
             transformer_i = build_transformer(transformer)
             self.transformer.append(transformer_i)
 
-
-
         self.deblocks = nn.ModuleList()
         upsample_strides = self.upsample_strides
 
@@ -136,41 +133,48 @@ class OccHead(nn.Module):
                     stride=1,
                     padding=1)
 
-
             deblock = nn.Sequential(upsample_layer,
                                     build_norm_layer(norm_cfg, out_channel)[1],
                                     nn.ReLU(inplace=True))
 
             self.deblocks.append(deblock)
 
-
-        self.occ = nn.ModuleList()
+        # occ pred for camera branch
+        self.occ_camera = nn.ModuleList()
         for i in self.out_indices:
-            if self.use_semantic:
-                occ = build_conv_layer(
-                    conv_cfg,
-                    in_channels=out_channels[i],
-                    out_channels=self.num_classes,
-                    kernel_size=1,
-                    stride=1,
-                    padding=0)
-                self.occ.append(occ)
-            else:
-                occ = build_conv_layer(
-                    conv_cfg,
-                    in_channels=out_channels[i],
-                    out_channels=1,
-                    kernel_size=1,
-                    stride=1,
-                    padding=0)
-                self.occ.append(occ)
-
+            occ = build_conv_layer(
+                conv_cfg,
+                in_channels=out_channels[i],
+                out_channels=self.num_classes,
+                kernel_size=1,
+                stride=1,
+                padding=0)
+            self.occ_camera.append(occ)
+        # occ pred for fusion branch
+        self.occ_fusion = nn.ModuleList()
+        # TODO: now only fuse the last level
+        # for i in self.out_indices:
+        #     occ = build_conv_layer(
+        #         conv_cfg,
+        #         in_channels=out_channels[i],
+        #         out_channels=self.num_classes,
+        #         kernel_size=1,
+        #         stride=1,
+        #         padding=0)
+        #     self.occ_fusion.append(occ)
+        occ = build_conv_layer(
+            conv_cfg,
+            in_channels=out_channels[-1],
+            out_channels=self.num_classes,
+            kernel_size=1,
+            stride=1,
+            padding=0)
+        self.occ_fusion.append(occ)
 
         self.volume_embedding = nn.ModuleList()
         for i in range(self.fpn_level):
             self.volume_embedding.append(nn.Embedding(
                     self.volume_h[i] * self.volume_w[i] * self.volume_z[i], self.embed_dims[i]))
-
 
         self.transfer_conv = nn.ModuleList()
         norm_cfg=dict(type='GN', num_groups=16, requires_grad=True)
@@ -205,9 +209,7 @@ class OccHead(nn.Module):
             if hasattr(m, 'conv_offset'):
                 constant_init(m.conv_offset, 0)
 
-    @auto_fp16(apply_to=('mlvl_feats'))
-    def forward(self, mlvl_feats, img_metas):
-
+    def get_volume_img_feats(self, mlvl_feats, img_metas):
         # image feature map shape: (B, N, C, H, W)
         bs, num_cam, _, _, _ = mlvl_feats[0].shape
         dtype = mlvl_feats[0].dtype
@@ -271,17 +273,43 @@ class OccHead(nn.Module):
             elif i < len(self.deblocks) - 2:  # we do not add skip connection at level 0
                 volume_embed_temp = volume_embed_reshape.pop()
                 result = result + volume_embed_temp
-            
-        occ_preds = []
+        
+        return outputs, volume_embed
+
+    @auto_fp16(apply_to=('mlvl_feats'))
+    def forward(self, mlvl_feats, img_metas, voxel_pts_feats=None, feature_fuse=None):
+
+        # get volume image features
+        volume_img_feats, volume_img_embed = self.get_volume_img_feats(mlvl_feats, img_metas)
+        # fuse volume image features and voxel points features
+        if feature_fuse is not None:
+            volume_feats = feature_fuse['occ_fuser'](volume_img_feats, voxel_pts_feats)
+            # TODO: add backbone and neck?
+            # volume_feats = feature_fuse['occ_encoder_backbone'](volume_feats)
+            # volume_feats = feature_fuse['occ_encoder_neck'](volume_feats)
+
+        # camera only branch
+        occ_preds_img = []
         # `self.occ` transform the feature dimension of fused volume feature to `num_classes`
         # `occ_pred: (bs, num_classes, W, H, Z)`
-        for i in range(len(outputs)):
-            occ_pred = self.occ[i](outputs[i])
-            occ_preds.append(occ_pred)
+        for i in range(len(volume_img_feats)):
+            occ_pred = self.occ_camera[i](volume_img_feats[i])
+            occ_preds_img.append(occ_pred)
+
+        # fusion (lidar + camera) branch
+        occ_preds_fusion = []
+        if feature_fuse is not None:
+            # TODO: now only fuse the last level feature
+            # for i in range(len(volume_feats)):
+            #     occ_pred = self.occ_fusion[i](volume_feats[i])
+            #     occ_preds_fusion.append(occ_pred)
+            occ_pred = self.occ_fusion[-1](volume_feats[-1])
+            occ_preds_fusion.append(occ_pred)
        
         outs = {
-            'volume_embed': volume_embed,
-            'occ_preds': occ_preds,
+            'volume_img_embed': volume_img_embed,
+            'occ_preds_img': occ_preds_img,
+            'occ_preds_fusion': occ_preds_fusion,
         }
 
         return outs
@@ -293,45 +321,37 @@ class OccHead(nn.Module):
              preds_dicts,
              img_metas):
      
-        if not self.use_semantic:
-            loss_dict = {}
-            for i in range(len(preds_dicts['occ_preds'])):
+        criterion = nn.CrossEntropyLoss(
+            ignore_index=255, reduction="mean"
+        )
+        
+        loss_dict = {}
+        for i in range(len(preds_dicts['occ_preds_img'])):
 
-                pred = preds_dicts['occ_preds'][i][:, 0]
-                ratio = 2**(len(preds_dicts['occ_preds']) - 1 - i)
+            pred_camera = preds_dicts['occ_preds_img'][i]
+            pred_fusion = preds_dicts['occ_preds_fusion'][i]
+            ratio = 2**(len(preds_dicts['occ_preds']) - 1 - i)
 
-                gt = multiscale_supervision(voxel_semantics.clone(), ratio, preds_dicts['occ_preds'][i].shape)
-                loss_occ_i = (F.binary_cross_entropy_with_logits(pred, gt) + geo_scal_loss(pred, gt.long(), semantic=False))
-                loss_occ_i =  loss_occ_i * ((0.5)**(len(preds_dicts['occ_preds']) - 1 -i)) #* focal_weight
-                loss_dict['loss_occ_{}'.format(i)] = loss_occ_i
-        else:
-            pred = preds_dicts['occ_preds']
-            criterion = nn.CrossEntropyLoss(
-                ignore_index=255, reduction="mean"
-            )
+            # `voxel_semantics` has the highest resolution
+            # Here we downsample the `voxel_semantics` to generate low level resolution labels
+            gt = multiscale_supervision(voxel_semantics.clone(), ratio, pred_camera.shape, self.coords_grid)
+            # align with the pred
+            gt = gt.permute(0, 2, 1, 3)
             
-            loss_dict = {}
-            for i in range(len(preds_dicts['occ_preds'])):
-
-                pred = preds_dicts['occ_preds'][i]
-                ratio = 2**(len(preds_dicts['occ_preds']) - 1 - i)
-
-                # `voxel_semantics` has the highest resolution
-                # Here we downsample the `voxel_semantics` to generate low level resolution labels
-                gt = multiscale_supervision(voxel_semantics.clone(), ratio, preds_dicts['occ_preds'][i].shape, self.coords_grid)
-                # align with the pred
-                gt = gt.permute(0, 2, 1, 3)
-                
-                if not self.use_mask:
-                    loss_occ_i = (criterion(pred, gt.long()) + sem_scal_loss(pred, gt.long()) + geo_scal_loss(pred, gt.long()))
-                else:
-                    # TODO: Multi-scale mask camera
-                    num_total_samples=mask_camera.sum()
-                    loss_occ_i = (criterion(pred, gt.long(), mask_camera, avg_factor=num_total_samples) \
-                        + sem_scal_loss(pred, gt.long()) + geo_scal_loss(pred, gt.long()))
-                
-                # focal weight
-                loss_occ_i = loss_occ_i * ((0.5)**(len(preds_dicts['occ_preds']) - 1 -i))
-                loss_dict['loss_occ_{}'.format(i)] = loss_occ_i
+            if not self.use_mask:
+                # TODO: add loss weights to bce loss
+                loss_occ_i_c = (criterion(pred_camera, gt.long()) + sem_scal_loss(pred_camera, gt.long()) + geo_scal_loss(pred_camera, gt.long()))
+                loss_occ_i_f = (criterion(pred_fusion, gt.long()) + sem_scal_loss(pred_fusion, gt.long()) + geo_scal_loss(pred_fusion, gt.long()))
+                xm_loss = F.kl_div(
+                    F.log_softmax(pred_camera, dim=1),
+                    F.softmax(pred_fusion.detach(), dim=1)
+                )
+                loss_occ_i = loss_occ_i_c + loss_occ_i_f + xm_loss * self.lambda_xm
+            else:
+                raise NotImplementedError
+            
+            # focal weight
+            loss_occ_i = loss_occ_i * ((0.5)**(len(preds_dicts['occ_preds']) - 1 -i))
+            loss_dict['loss_occ_{}'.format(i)] = loss_occ_i
 
         return loss_dict
