@@ -242,11 +242,13 @@ if __name__ == '__main__':
                 dense_occ_path = os.path.join(args.dense_occ_root, dense_occ_name)
                 sparse_occ_path = os.path.join(args.sparse_occ_root, info['occ_gt_path'])
                 dense_occ = np.load(open(dense_occ_path, "rb"))
-                sparse_occ = np.load(open(sparse_occ_path, "rb"))['semantics']
+                sparse_file = np.load(open(sparse_occ_path, "rb"))
+                sparse_occ = sparse_file['semantics']
+                mask_lidar, mask_camera = sparse_file['mask_lidar'], sparse_file['mask_camera']
                 dense_occ_converted = combine(dense_occ, sparse_occ)
                 save_path = os.path.join(args.save_root, info['occ_gt_path'])
                 os.makedirs(os.path.dirname(save_path), exist_ok=True)
-                np.save(open(dense_occ_path, 'wb'), dense_occ_converted)
+                np.savez(open(dense_occ_path, 'wb'), semantics=dense_occ_converted, mask_lidar=mask_lidar, mask_camera=mask_camera)
                 if args.draw:
                     draw(dense_occ_converted, sparse_occ, version='SurrOcc')
         print('====> Done.')
