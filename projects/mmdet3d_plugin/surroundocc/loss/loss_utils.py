@@ -17,7 +17,7 @@ def multiscale_supervision(voxel_semantics, ratio, gt_shape, original_coords):
     gt += 17
     for i in range(gt.shape[0]):
         # Roughly calculate the downsampled label
-        # TODO: verify, remove free
+        # remove all the free voxels first
         original_coords = original_coords.to(voxel_semantics.device)
         voxel_semantics_with_coords = torch.vstack([original_coords.T, voxel_semantics[i].reshape(-1)]).T
         voxel_semantics_with_coords = voxel_semantics_with_coords[voxel_semantics_with_coords[:, 3] < 17]

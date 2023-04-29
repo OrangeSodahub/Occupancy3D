@@ -4,6 +4,7 @@
 #  Modified by Zhiqi Li
 # ---------------------------------------------
 
+import copy
 import torch
 import mmdet3d
 import numpy as np
@@ -51,8 +52,33 @@ class SurroundOcc(MVXTwoStageDetector):
 
         self.use_semantic = use_semantic
         self.is_vis = is_vis
+        self.prev_frame_info = {
+            'prev_feat': None,
+            'scene_token': None,
+            'prev_pos': 0,
+            'prev_angle': 0,
+        }
                   
+    def obtain_history_feat(self, imgs_queue, img_metas_list):
+        """Obtain history 3D volume features iteratively. To save GPU memory, gradients are not calculated.
+        """
+        self.eval()
 
+        with torch.no_grad():
+            prev_feat = None
+            bs, len_queue, num_cams, C, H, W = imgs_queue.shape
+            imgs_queue = imgs_queue.reshape(bs * len_queue, num_cams, C, H, W)
+            img_feats_list = self.extract_feat(img=imgs_queue, len_queue=len_queue) # len_queue
+            for i in range(len_queue):
+                img_metas = [each[i] for each in img_metas_list]
+                if not img_metas[0]['prev_feat_exists']:
+                    prev_feat = None
+                img_feats = [each_scale[:, i] for each_scale in img_feats_list]
+                prev_feat = self.pts_bbox_head(
+                    img_feats, img_metas, prev_feat, only_feat=True)
+
+            self.train()
+            return prev_feat
 
     def extract_img_feat(self, img, img_metas, len_queue=None):
         """Extract features of images."""
@@ -101,10 +127,11 @@ class SurroundOcc(MVXTwoStageDetector):
                           pts_feats,
                           voxel_semantics,
                           mask_camera,
-                          img_metas):
+                          img_metas,
+                          prev_feat=None):
 
         outs = self.pts_bbox_head(
-            pts_feats, img_metas)
+            pts_feats, img_metas, prev_feat)
         # `voxel_semantics` only used in loss calculation
         # with multi-scale supervision
         loss_inputs = [voxel_semantics, mask_camera, outs]
@@ -141,28 +168,51 @@ class SurroundOcc(MVXTwoStageDetector):
                       mask_lidar=None,
                       mask_camera=None,
                       ):
+        # img: (bs, len_queue, N, C, H, W) 
+        len_queue = img.size(1)
+        prev_img = img[:, :-1, ...]
+        img = img[:, -1, ...]
 
-        img_feats = self.extract_feat(img=img, img_metas=img_metas)
+        prev_img_metas = copy.deepcopy(img_metas)
+        prev_feat = self.obtain_history_feat(prev_img, prev_img_metas)
+        
+        img_metas = [each[len_queue - 1] for each in img_metas]
+        if not img_metas[0]['prev_feat_exists']:
+            prev_feat = None
+        img_feats = self.extract_feat(img=img, img_metas=img_metas) # len_queue = None
         losses = dict()
         losses_pts = self.forward_pts_train(img_feats, voxel_semantics, mask_camera,
-                                             img_metas)
+                                             img_metas, prev_feat)
 
         losses.update(losses_pts)
         return losses
 
     def forward_test(self, img_metas, img=None, voxel_semantics=None, **kwargs):
+        if img_metas[0]['scene_token'] != self.prev_frame_info['scene_token']:
+            # the first sample of each scene is truncated
+            self.prev_frame_info['prev_bev'] = None
+        # update idx
+        self.prev_frame_info['scene_token'] = img_metas[0]['scene_token']
+
+        # Get the delta of ego position and angle between two timestamps.
+        tmp_pos = copy.deepcopy(img_metas[0]['can_bus'][:3])
+        tmp_angle = copy.deepcopy(img_metas[0]['can_bus'][-1])
+        if self.prev_frame_info['prev_bev'] is not None:
+            img_metas[0]['can_bus'][:3] -= self.prev_frame_info['prev_pos']
+            img_metas[0]['can_bus'][-1] -= self.prev_frame_info['prev_angle']
+        else:
+            img_metas[0]['can_bus'][-1] = 0
+            img_metas[0]['can_bus'][:3] = 0
         
         output = self.simple_test(
-            img_metas, img, **kwargs)
+            img_metas, img, prev_feat=self.prev_frame_info['prev_feat'], **kwargs)
         
-        pred_occ = output['occ_preds']
+        pred_occ = output['occ_preds'][-1]
+        new_prev_feat = output['volume_embed'][0]
+        self.prev_frame_info['prev_pos'] = tmp_pos
+        self.prev_frame_info['prev_angle'] = tmp_angle
+        self.prev_frame_info['prev_feat'] = new_prev_feat
 
-        # `pred_occ` got multi-scale pred results
-        # Here we only use the last one with shape of (200, 200, 16)
-        # for evalution with ground truth
-        if type(pred_occ) == list:
-            pred_occ = pred_occ[-1]
-        
         if self.is_vis:
             self.generate_output(pred_occ, img_metas)
             return pred_occ.shape[0]
@@ -176,19 +226,18 @@ class SurroundOcc(MVXTwoStageDetector):
 
         return occ_score
         
-    def simple_test_pts(self, x, img_metas, rescale=False):
+    def simple_test_pts(self, x, img_metas, prev_feat=None, rescale=False):
         """Test function"""
-        outs = self.pts_bbox_head(x, img_metas)
-
+        outs = self.pts_bbox_head(x, img_metas, prev_feat)
         return outs
 
-    def simple_test(self, img_metas, img=None, rescale=False):
+    def simple_test(self, img_metas, img=None, prev_feat=None, rescale=False):
         """Test function without augmentaiton."""
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
 
         bbox_list = [dict() for i in range(len(img_metas))]
         output = self.simple_test_pts(
-            img_feats, img_metas, rescale=rescale)
+            img_feats, img_metas, prev_feat, rescale=rescale)
 
         return output
 

@@ -3,3 +3,12 @@ data/
 
 # Python
 *pycache*
+
+# checkpoint
+*ckpt*
+
+# workdirs
+*work_dirs*
+
+# Debug
+*debug*

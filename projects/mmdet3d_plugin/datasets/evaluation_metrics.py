@@ -179,8 +179,6 @@ class Metric_FScore():
         self.tot_f1_mean = 0.
         self.eps = 1e-8
 
-
-
     def voxel2points(self, voxel):
         # occIdx = torch.where(torch.logical_and(voxel != FREE, voxel != NOT_OBSERVED))
         # if isinstance(voxel, np.ndarray): voxel = torch.from_numpy(voxel)
