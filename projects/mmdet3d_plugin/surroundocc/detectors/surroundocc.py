@@ -18,6 +18,7 @@ from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 @DETECTORS.register_module()
 class SurroundOcc(MVXTwoStageDetector):
     def __init__(self,
+                 stage=None,
                  use_grid_mask=False,
                  pts_voxel_layer=None,
                  pts_voxel_encoder=None,
@@ -44,6 +45,8 @@ class SurroundOcc(MVXTwoStageDetector):
                              img_backbone, pts_backbone, img_neck, pts_neck,
                              pts_bbox_head, img_roi_head, img_rpn_head,
                              train_cfg, test_cfg, pretrained)
+        assert stage in ['stage1', 'stage2']
+        self.stage = stage
         self.grid_mask = GridMask(
             True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
         self.use_grid_mask = use_grid_mask
@@ -52,8 +55,6 @@ class SurroundOcc(MVXTwoStageDetector):
         self.use_semantic = use_semantic
         self.is_vis = is_vis
                   
-
-
     def extract_img_feat(self, img, img_metas, len_queue=None):
         """Extract features of images."""
         B = img.size(0)
@@ -96,19 +97,36 @@ class SurroundOcc(MVXTwoStageDetector):
         
         return img_feats
 
-
     def forward_pts_train(self,
                           pts_feats,
                           voxel_semantics,
                           mask_camera,
+                          depth_gt,
                           img_metas):
+        losses = dict()
 
-        outs = self.pts_bbox_head(
-            pts_feats, img_metas)
+        # For now directly use existing depth model to
+        # generate depth map to test the performance
+        if self.stage == 'stage1':
+            assert self.pts_backbone is not None
+            # TODO: predict depth map
+            # TODO: for now only support single frame
+            with_depgh_gt = (depth_gt is not None)
+            ssc_pred, depth_pred = self.pts_backbone(pts_feats, img_metas, with_depgh_gt)
+            loss_inputs = [ssc_pred, depth_pred, voxel_semantics, depth_gt, mask_camera]
+            losses_depth = self.pts_backbone.loss(*loss_inputs)
+            losses.update(losses_depth)
+
+        # predict occ volume
         # `voxel_semantics` only used in loss calculation
         # with multi-scale supervision
-        loss_inputs = [voxel_semantics, mask_camera, outs]
-        losses = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
+        elif self.stage == 'stage2':
+            assert self.pts_bbox_head is not None
+            occ_pred = self.pts_bbox_head(pts_feats, img_metas)
+            loss_inputs = [voxel_semantics, mask_camera, occ_pred]
+            losses_occ = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
+            losses.update(losses_occ)
+
         return losses
 
     def forward_dummy(self, img):
@@ -132,7 +150,6 @@ class SurroundOcc(MVXTwoStageDetector):
         else:
             return self.forward_test(**kwargs)
     
-
     @auto_fp16(apply_to=('img', 'points'))
     def forward_train(self,
                       img_metas=None,
@@ -140,12 +157,15 @@ class SurroundOcc(MVXTwoStageDetector):
                       voxel_semantics=None,
                       mask_lidar=None,
                       mask_camera=None,
+                      depth_gt=None,
                       ):
 
+        # extract image features
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
+
         losses = dict()
         losses_pts = self.forward_pts_train(img_feats, voxel_semantics, mask_camera,
-                                             img_metas)
+                                            depth_gt, img_metas)
 
         losses.update(losses_pts)
         return losses

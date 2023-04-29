@@ -2,6 +2,7 @@
 import torch
 import random
 import pdb, os
+import tempfile
 import numpy as np
 from tqdm import tqdm
 from os import path as osp
@@ -71,6 +72,7 @@ class CustomNuScenesOccDataset(NuScenesDataset):
         # standard protocal modified from SECOND.Pytorch
         input_dict = dict(
             occ_path = info['occ_gt_path'],
+            depth_path = info.get('depth_gt_path', None),
             occ_size = np.array(self.occ_size),
             pc_range = np.array(self.pc_range)
         )

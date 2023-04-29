@@ -11,7 +11,6 @@ def multiscale_supervision(voxel_semantics, ratio, gt_shape, original_coords):
     # `gt_shape: (bs, num_classes, W, H, Z)`
     # `gt: (bs, W, H, Z)`
     gt = torch.zeros([gt_shape[0], gt_shape[2], gt_shape[3], gt_shape[4]]).to(voxel_semantics.device).type(torch.float) 
-    # TODO: verify, 0 or 17?
     # In the dataset provided by CVPR2023 challenge, all the voxels
     # which has no labels (0-16) are labeled as 17 (free or empty)
     gt += 17
@@ -103,3 +102,31 @@ def sem_scal_loss(pred, ssc_target):
             loss += loss_class
     return loss / count
 
+
+def depth_loss(pred, target):
+    pass
+
+
+def BCE_ssc_loss(pred, target, alpha, mask_camera):
+    class_weights = torch.zeros((2)).float().to(pred.device)
+
+    # binary classification
+    zeros_mask = (target == 17)
+    target[zeros_mask] = 0
+    target[~zeros_mask] = 1
+
+    # TODO: remove outside camera range
+    # mask_camera = mask_camera.bool()
+    # pred = pred[mask_camera, :]
+    # target = target[mask_camera]
+    
+    class_weights[0] = 1-alpha  # empty
+    class_weights[1] = alpha    # occupied
+
+    criterion = nn.CrossEntropyLoss(
+        weight=class_weights, ignore_index=255, reduction="none"
+    )
+    loss = criterion(pred, target.long())
+    loss_mean = torch.mean(loss)
+
+    return loss_mean
