@@ -17,6 +17,7 @@ import cv2 as cv
 from projects.mmdet3d_plugin.models.utils.visual import save_tensor
 from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import multiscale_supervision, geo_scal_loss, sem_scal_loss
 from mmcv.cnn import build_conv_layer, build_norm_layer, build_upsample_layer
+from mmcv.cnn.bricks.transformer import build_positional_encoding
 from mmdet.models.utils import build_transformer
 from mmcv.cnn.utils.weight_init import constant_init
 import os
@@ -30,7 +31,9 @@ except ImportError: # py3k
 class OccHead(nn.Module): 
     def __init__(self,
                  *args,
-                 transformer_template=None,
+                 cross_transformer_template=None,
+                 self_transformer_template=None,
+                 positonal_encoding_template=None,
                  num_classes=18,
                  volume_h=[100, 50, 25],
                  volume_w=[100, 50, 25],
@@ -49,7 +52,6 @@ class OccHead(nn.Module):
         self.conv_input = conv_input
         self.conv_output = conv_output
         
-        
         self.num_classes = num_classes
         self.volume_h = volume_h
         self.volume_w = volume_w
@@ -65,46 +67,66 @@ class OccHead(nn.Module):
         self.fpn_level = len(self.embed_dims)
         self.upsample_strides = upsample_strides
         self.out_indices = out_indices
-        self.transformer_template = transformer_template
+
+        self.cross_transformer_template = cross_transformer_template
+        self.self_transformer_template = self_transformer_template
+        self.positional_encoding_template = positonal_encoding_template
 
         self._init_layers()
 
     def _init_layers(self):
-        self.transformer = nn.ModuleList()
+        self.cross_transformer = nn.ModuleList()
+        self.self_transformer = nn.ModuleList()
+        self.positional_encoding = nn.ModuleList()
         for i in range(self.fpn_level):
-            transformer = copy.deepcopy(self.transformer_template)
+            cross_transformer = copy.deepcopy(self.cross_transformer_template)
+            self_transformer = copy.deepcopy(self.self_transformer_template)
+            positional_encoding = copy.deepcopy(self.positional_encoding_template)
 
             # `transformer.embed_dims = [128, 256, 512]`
-            transformer.embed_dims = transformer.embed_dims[i]
-
+            cross_transformer.embed_dims = self.cross_transformer_template.embed_dims[i]
             # `num_points = _num_points_ = [2, 4, 8]`
-            # Here only one attn_cfgs: `SpatialCrossAttention`
-            transformer.encoder.transformerlayers.attn_cfgs[0].deformable_attention.num_points = \
-                self.transformer_template.encoder.transformerlayers.attn_cfgs[0].deformable_attention.num_points[i]
-
+            cross_transformer.encoder.transformerlayers.attn_cfgs[0].deformable_attention.num_points = \
+                self.cross_transformer_template.encoder.transformerlayers.attn_cfgs[0].deformable_attention.num_points[i]
             # `feedforward_channels = _ffn_dim_ = [256, 512, 1204]`
-            transformer.encoder.transformerlayers.feedforward_channels = \
-                self.transformer_template.encoder.transformerlayers.feedforward_channels[i]
-            
+            cross_transformer.encoder.transformerlayers.feedforward_channels = \
+                self.cross_transformer_template.encoder.transformerlayers.feedforward_channels[i]
             # `transformer.embed_dims = [128, 256, 512]`
-            transformer.encoder.transformerlayers.embed_dims = \
-                self.transformer_template.encoder.transformerlayers.embed_dims[i]
-
+            cross_transformer.encoder.transformerlayers.embed_dims = \
+                self.cross_transformer_template.encoder.transformerlayers.embed_dims[i]
             #`transformer.embed_dims = [128, 256, 512]`
-            transformer.encoder.transformerlayers.attn_cfgs[0].embed_dims = \
-                self.transformer_template.encoder.transformerlayers.attn_cfgs[0].embed_dims[i]
-            
+            cross_transformer.encoder.transformerlayers.attn_cfgs[0].embed_dims = \
+                self.cross_transformer_template.encoder.transformerlayers.attn_cfgs[0].embed_dims[i]
             #`transformer.embed_dims = [128, 256, 512]`
-            transformer.encoder.transformerlayers.attn_cfgs[0].deformable_attention.embed_dims = \
-                self.transformer_template.encoder.transformerlayers.attn_cfgs[0].deformable_attention.embed_dims[i]
-            
+            cross_transformer.encoder.transformerlayers.attn_cfgs[0].deformable_attention.embed_dims = \
+                self.cross_transformer_template.encoder.transformerlayers.attn_cfgs[0].deformable_attention.embed_dims[i]
             # `num_layers = _num_layers_ = [1, 3, 6]`
-            transformer.encoder.num_layers = self.transformer_template.encoder.num_layers[i]
+            cross_transformer.encoder.num_layers = self.cross_transformer_template.encoder.num_layers[i]
 
-            transformer_i = build_transformer(transformer)
-            self.transformer.append(transformer_i)
+            self_transformer.embed_dims = self.self_transformer_template.embed_dims[i]
+            self_transformer.encoder.transformerlayers.feedforward_channels = \
+                self.self_transformer_template.encoder.transformerlayers.feedforward_channels[i]
+            self_transformer.encoder.transformerlayers.embed_dims = \
+                self.self_transformer_template.encoder.transformerlayers.embed_dims[i]
+            self_transformer.encoder.num_layers = self.self_transformer_template.encoder.num_layers[i]
+            self_transformer.encoder.transformerlayers.attn_cfgs[0].embed_dims = \
+                self.self_transformer_template.encoder.transformerlayers.attn_cfgs[0].embed_dims[i]
+            self_transformer.encoder.transformerlayers.attn_cfgs[0].num_points = \
+                self.self_transformer_template.encoder.transformerlayers.attn_cfgs[0].num_points[i]
 
+            
 
+            positional_encoding.num_feats = self.positional_encoding_template.num_feats[i]
+            positional_encoding.row_num_embed = self.positional_encoding_template.row_num_embed[i]
+            positional_encoding.col_num_embed = self.positional_encoding_template.col_num_embed[i]
+
+            cross_transformer_i = build_transformer(cross_transformer)
+            self_transformer_i = build_transformer(self_transformer)
+            positional_encoding_i = build_positional_encoding(positional_encoding)
+
+            self.cross_transformer.append(cross_transformer_i)
+            self.self_transformer.append(self_transformer_i)
+            self.positional_encoding.append(positional_encoding_i)
 
         self.deblocks = nn.ModuleList()
         upsample_strides = self.upsample_strides
@@ -170,7 +192,9 @@ class OccHead(nn.Module):
         for i in range(self.fpn_level):
             self.volume_embedding.append(nn.Embedding(
                     self.volume_h[i] * self.volume_w[i] * self.volume_z[i], self.embed_dims[i]))
-
+        self.mask_embedding = nn.ModuleList()
+        for i in range(self.fpn_level):
+            self.mask_embedding.append(nn.Embedding(1, self.embed_dims[i]))
 
         self.transfer_conv = nn.ModuleList()
         norm_cfg=dict(type='GN', num_groups=16, requires_grad=True)
@@ -198,21 +222,40 @@ class OccHead(nn.Module):
     def init_weights(self):
         """Initialize weights of the DeformDETR head."""
         for i in range(self.fpn_level):
-            self.transformer[i].init_weights()
+            self.cross_transformer[i].init_weights()
+            self.self_transformer[i].init_weights()
                 
         for m in self.modules():
             # DeformConv2dPack, ModulatedDeformConv2dPack
             if hasattr(m, 'conv_offset'):
                 constant_init(m.conv_offset, 0)
 
+    def get_multiscale_occ_mask(self, original_gt, scale=0):
+        ratio = 2 ** (scale + 1)
+        B, H, W, Z = np.array(original_gt.shape)
+        H , W, Z = H // ratio, W // ratio, Z // ratio
+        gt = torch.zeros([B, H, W, Z]).long().to(original_gt.device) + 17
+        original_coords = self.coords_grid
+        for i in range(gt.shape[0]):
+            original_coords = original_coords.to(original_gt.device)
+            voxel_semantics_with_coords = torch.vstack([original_coords.T, original_gt[i].reshape(-1)]).T
+            voxel_semantics_with_coords = voxel_semantics_with_coords[voxel_semantics_with_coords[:, 3] < 17]
+            downsampled_coords = torch.div(voxel_semantics_with_coords[:, :3].long(), ratio, rounding_mode='floor')
+            gt[i, downsampled_coords[:, 0], downsampled_coords[:, 1], downsampled_coords[:, 2]] = \
+                                                                                voxel_semantics_with_coords[:, 3]
+        mask_gt = (gt == 17)
+        return mask_gt
+
     @auto_fp16(apply_to=('mlvl_feats'))
-    def forward(self, mlvl_feats, img_metas):
+    def forward(self, mlvl_feats, occ_gt=None, img_metas=None):
 
         # image feature map shape: (B, N, C, H, W)
         bs, num_cam, _, _, _ = mlvl_feats[0].shape
         dtype = mlvl_feats[0].dtype
 
         volume_embed = []
+        pos_h = [200, 100, 50]
+        pos_w = [400, 100, 25]
 
         # fpn_level=3 (embeding_dims=[128, 256, 512])
         for i in range(self.fpn_level):
@@ -222,6 +265,7 @@ class OccHead(nn.Module):
             # `                [2]: (in) 1250  (out) 512`
             # `volume_queries` of shape (80000, 128)/(10000, 256)/(1250, 512) => (H*W*Z, C)
             volume_queries = self.volume_embedding[i].weight.to(dtype)
+            mask_queries = self.mask_embedding[i].weight.to(dtype)
             
             # volume_h_ = [100, 50, 25]
             # volume_w_ = [100, 50, 25]
@@ -236,17 +280,41 @@ class OccHead(nn.Module):
             # `             [1]: (in) 512 (out) 256`
             # `             [2]: (in) 512 (out) 512`
             view_features = self.transfer_conv[i](mlvl_feats[i].reshape(bs*num_cam, C, H, W)).reshape(bs, num_cam, -1, H, W)
+            mask_gt = self.get_multiscale_occ_mask(occ_gt, scale=i) if occ_gt is not None else None
 
-            volume_embed_i = self.transformer[i](
+            # cross attention
+            volume_embed_i = self.cross_transformer[i](
                 [view_features],
                 volume_queries,
                 volume_h=volume_h,
                 volume_w=volume_w,
                 volume_z=volume_z,
+                mask_gt=mask_gt,
                 img_metas=img_metas
             )
+
+            # Complete volume queries by adding mask tokens
+            volume_embed_i_ = torch.empty((volume_h, volume_w, volume_z, self.embed_dims[i]), device=volume_queries.device)
+            volume_embed_i_flatten = volume_embed_i_.reshape(-1, self.embed_dims[i])
+            volume_embed_i_flatten[mask_gt.reshape(-1), :] = volume_embed_i
+            volume_embed_i_flatten[~mask_gt.reshape(-1), :] = mask_queries.view(1, self.embed_dims[i]).expand((~mask_gt).sum(), self.embed_dims[i])
+
+            # self attention
+            volume_pos_self_attn = self.positional_encoding[i](torch.zeros((bs, pos_h[i], pos_w[i]), device=volume_queries.device)).to(dtype)
+            volume_embed_i = self.self_transformer[i].diffuse_volume_features(
+                [view_features],
+                volume_embed_i_flatten,
+                volume_pos=volume_pos_self_attn,
+                volume_h=volume_h,
+                volume_w=volume_w,
+                volume_z=volume_z,
+                pos_h=pos_h[i],
+                pos_w=pos_w[i],
+                mask_gt=mask_gt,
+                img_metas=img_metas
+            )
+
             volume_embed.append(volume_embed_i)
-        
 
         volume_embed_reshape = []
         for i in range(self.fpn_level):

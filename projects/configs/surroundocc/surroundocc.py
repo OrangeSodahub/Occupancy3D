@@ -28,12 +28,15 @@ input_modality = dict(
     use_external=True)
 
 _dim_ = [128, 256, 512]
+_pos_dim_ = [64, 128, 256]
 _ffn_dim_ = [256, 512, 1024]
 volume_h_ = [100, 50, 25]
 volume_w_ = [100, 50, 25]
 volume_z_ = [8, 4, 2]
-_num_points_ = [2, 4, 8]
-_num_layers_ = [1, 3, 6]
+_num_points_cross_ = [2, 4, 8]
+_num_points_self_ = [1, 2, 4]
+_num_layers_cross_ = [1, 3, 6]
+_num_layers_self_ = [2, 2, 2]
 
 model = dict(
     type='SurroundOcc',
@@ -75,12 +78,12 @@ model = dict(
         img_channels=[512, 512, 512],
         use_semantic=use_semantic,
         use_mask=use_mask,
-        transformer_template=dict(
+        cross_transformer_template=dict(
             type='PerceptionTransformer',
             embed_dims=_dim_,
             encoder=dict(
                 type='OccEncoder',
-                num_layers=_num_layers_,
+                num_layers=_num_layers_cross_,
                 pc_range=point_cloud_range,
                 return_intermediate=False,
                 transformerlayers=dict(
@@ -92,7 +95,7 @@ model = dict(
                             deformable_attention=dict(
                                 type='MSDeformableAttention3D',
                                 embed_dims=_dim_,
-                                num_points=_num_points_,
+                                num_points=_num_points_cross_,
                                 num_levels=1),
                             embed_dims=_dim_,
                         )
@@ -103,7 +106,37 @@ model = dict(
                     conv_num=2,
                     operation_order=('cross_attn', 'norm',
                                      'ffn', 'norm', 'conv')))),
-),
+        self_transformer_template=dict(
+            type='PerceptionTransformer',
+            embed_dims=_dim_,
+            encoder=dict(
+                type='OccEncoder',
+                num_layers=_num_layers_self_,
+                pc_range=point_cloud_range,
+                return_intermediate=False,
+                transformerlayers=dict(
+                    type='OccLayer',
+                    attn_cfgs=[
+                        dict(
+                            type='SpatialSelfAttention',
+                            embed_dims=_dim_,
+                            num_levels=1,
+                            num_points=_num_points_self_,
+                        )
+                    ],
+                    feedforward_channels=_ffn_dim_,
+                    ffn_dropout=0.1,
+                    embed_dims=_dim_,
+                    conv_num=2,
+                    operation_order=('self_attn', 'norm',
+                                     'ffn', 'norm', 'conv')))),
+        positional_encoding_template=dict(
+            type='LearnedPositionalEncoding',
+            num_feats=_pos_dim_,                    # [56, 128, 256]
+            row_num_embed=volume_h_,                # [100, 50, 25]
+            col_num_embed=volume_w_,                # [100, 50, 25]
+        ),
+    ),
 )
 
 dataset_type = 'CustomNuScenesOccDataset'
@@ -127,7 +160,7 @@ test_pipeline = [
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-    dict(type='CustomCollect3D', keys=[ 'img'])
+    dict(type='CustomCollect3D', keys=[ 'img', 'voxel_semantics'])
 ]
 
 find_unused_parameters = True

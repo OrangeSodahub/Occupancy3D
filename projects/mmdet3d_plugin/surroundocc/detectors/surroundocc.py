@@ -104,7 +104,7 @@ class SurroundOcc(MVXTwoStageDetector):
                           img_metas):
 
         outs = self.pts_bbox_head(
-            pts_feats, img_metas)
+            pts_feats, voxel_semantics, img_metas)
         # `voxel_semantics` only used in loss calculation
         # with multi-scale supervision
         loss_inputs = [voxel_semantics, mask_camera, outs]
@@ -153,7 +153,7 @@ class SurroundOcc(MVXTwoStageDetector):
     def forward_test(self, img_metas, img=None, voxel_semantics=None, **kwargs):
         
         output = self.simple_test(
-            img_metas, img, **kwargs)
+            img_metas, img, voxel_semantics, **kwargs)
         
         pred_occ = output['occ_preds']
 
@@ -176,19 +176,19 @@ class SurroundOcc(MVXTwoStageDetector):
 
         return occ_score
         
-    def simple_test_pts(self, x, img_metas, rescale=False):
+    def simple_test_pts(self, x, img_metas, voxel_semantics=None, rescale=False):
         """Test function"""
-        outs = self.pts_bbox_head(x, img_metas)
+        outs = self.pts_bbox_head(x, voxel_semantics, img_metas)
 
         return outs
 
-    def simple_test(self, img_metas, img=None, rescale=False):
+    def simple_test(self, img_metas, img=None, voxel_semantics=None, rescale=False):
         """Test function without augmentaiton."""
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
 
         bbox_list = [dict() for i in range(len(img_metas))]
         output = self.simple_test_pts(
-            img_feats, img_metas, rescale=rescale)
+            img_feats, img_metas, voxel_semantics, rescale=rescale)
 
         return output
 

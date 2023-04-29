@@ -87,11 +87,13 @@ class PerceptionTransformer(BaseModule):
             volume_h,
             volume_w,
             volume_z,
+            mask_gt,
             **kwargs):
 
         bs = mlvl_feats[0].size(0)
         # `volume_queries`: (H*W*Z, C) -> (H*W*Z, bs, C)
         volume_queries = volume_queries.unsqueeze(1).repeat(1, bs, 1)
+        unmasked_volume_queries = volume_queries[mask_gt.reshape(-1), ...]
 
         feat_flatten = []
         spatial_shapes = []
@@ -119,15 +121,50 @@ class PerceptionTransformer(BaseModule):
             0, 2, 1, 3) # (num_cam, H*W, bs, embed_dims)
 
         volume_embed = self.encoder(
-                volume_queries,
+                unmasked_volume_queries,
                 feat_flatten,
                 feat_flatten,
                 volume_h=volume_h,
                 volume_w=volume_w,
                 volume_z=volume_z,
+                mask_gt=mask_gt,
                 spatial_shapes=spatial_shapes,
                 level_start_index=level_start_index,
                 **kwargs
             )
 
+        return volume_embed
+
+    @auto_fp16(apply_to=('mlvl_feats', 'volume_queries'))
+    def diffuse_volume_features(
+            self,
+            mlvl_feats,
+            volume_queries,
+            volume_pos,
+            volume_h,
+            volume_w,
+            volume_z,
+            pos_h,
+            pos_w,
+            mask_gt,
+            **kwargs):
+
+        bs = mlvl_feats[0].size(0)
+        volume_queries = volume_queries.unsqueeze(1).repeat(1, bs, 1)
+        volume_pos = volume_pos.flatten(2).permute(2, 0, 1)
+        
+        volume_embed = self.encoder(
+                volume_queries,
+                None,
+                None,
+                volume_pos=volume_pos,
+                volume_h=volume_h,
+                volume_w=volume_w,
+                volume_z=volume_z,
+                pos_h=pos_h,
+                pos_w=pos_w,
+                mask_gt=mask_gt,
+                **kwargs
+            )
+        
         return volume_embed
