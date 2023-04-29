@@ -2,7 +2,9 @@
 # from the challenge dataset and the OpenOccupancy dataset respectively.
 
 import os
+import json
 import pickle
+import shutil
 import argparse
 import numpy as np
 from tqdm import tqdm
@@ -221,6 +223,7 @@ if __name__ == '__main__':
     parser.add_argument('--save_root', type=str, default='../../data/new_occ/', help='save path')
     parser.add_argument('--train_pkl', type=str, default='../../data/occ3d_nus/occ_infos_temporal_train.pkl', help='train pkl')
     parser.add_argument('--val_pkl', type=str, default='../../data/occ3d_nus/occ_infos_temporal_val.pkl', help='val pkl')
+    parser.add_argument('--anno_path', type=str, default='../../data/occ3d_nus/annotations.json', help='annotation path')
     parser.add_argument('--draw', action='store_true', help='draw the occupancy')
     args = parser.parse_args()
     
@@ -230,7 +233,8 @@ if __name__ == '__main__':
         dense_occ_path = './69b793ec8dc44e2fbd33d8cdd16b5a31.npy'
 
     elif args.version == 'SurrOcc':
-        for pkl in [args.train_pkl, args.val_pkl]:
+        # convert sparse to dense for train split
+        for pkl in [args.train_pkl]:
             print(f'====> Load {pkl}')
             infos = pickle.load(open(pkl, 'rb'))['infos']
             dense_occ_names = os.listdir(args.dense_occ_root)
@@ -251,8 +255,16 @@ if __name__ == '__main__':
                 np.savez(open(dense_occ_path, 'wb'), semantics=dense_occ_converted, mask_lidar=mask_lidar, mask_camera=mask_camera)
                 if args.draw:
                     draw(dense_occ_converted, sparse_occ, version='SurrOcc')
-        print('====> Done.')
+        print('====> Convert sparse to dense Done.')
 
+        # copy sparse for val split
+        annos = json.load(open(args.anno_path, 'r'))
+        val_split = annos['val_split']
+        for scene in tqdm(val_split):
+            src = os.path.join(args.sparse_occ_root, f'gts/{scene}')
+            dst = os.path.join(args.save_root, f'gts/{scene}')
+            shutil.copytr(src, dst)
+        print('====> Copy sparse Done.')
 
         # dense_occ_path = './data/n015-2018-07-18-11-07-57+0800__LIDAR_TOP__1531883530949817.pcd.bin.npy'
         # sparse_occ_path = './data/labels.npz'
