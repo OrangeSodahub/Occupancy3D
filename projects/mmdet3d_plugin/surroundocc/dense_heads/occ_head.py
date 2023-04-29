@@ -6,25 +6,18 @@
 
 import copy
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
 from mmdet.models import HEADS
-from mmcv.runner import force_fp32, auto_fp16
-import numpy as np
-import mmcv
-import cv2 as cv
-from projects.mmdet3d_plugin.models.utils.visual import save_tensor
-from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import multiscale_supervision, geo_scal_loss, sem_scal_loss
-from mmcv.cnn import build_conv_layer, build_norm_layer, build_upsample_layer
 from mmdet.models.utils import build_transformer
+from mmcv.runner import force_fp32, auto_fp16
 from mmcv.cnn.utils.weight_init import constant_init
-import os
-from torch.autograd import Variable
-try:
-    from itertools import  ifilterfalse
-except ImportError: # py3k
-    from itertools import  filterfalse as ifilterfalse
+from mmcv.cnn import build_conv_layer, build_norm_layer, build_upsample_layer
+from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import multiscale_supervision, geo_scal_loss, sem_scal_loss
+from projects.mmdet3d_plugin.surroundocc.modules.utils import nusc_class_frequencies
+
 
 @HEADS.register_module()
 class OccHead(nn.Module): 
@@ -321,8 +314,9 @@ class OccHead(nn.Module):
              preds_dicts,
              img_metas):
      
+        class_weights = torch.from_numpy(1 / np.log(nusc_class_frequencies + 0.001))
         criterion = nn.CrossEntropyLoss(
-            ignore_index=255, reduction="mean"
+            weight=class_weights.type_as(preds_dicts['occ_preds_img'][0]), ignore_index=255, reduction="mean"
         )
         
         loss_dict = {}
