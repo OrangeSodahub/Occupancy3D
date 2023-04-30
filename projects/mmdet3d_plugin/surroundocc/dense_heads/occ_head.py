@@ -337,7 +337,7 @@ class OccHead(nn.Module):
                 loss_occ_i += loss_occ_i_f + xm_loss * self.lambda_xm
             
             # focal weight
-            loss_occ_i = loss_occ_i * ((0.5)**(len(pred_camera) - 1 -i))
+            loss_occ_i = loss_occ_i * ((0.5)**(len(preds_dicts['occ_preds_img']) - 1 -i))
             loss_dict['loss_occ_{}'.format(i)] = loss_occ_i
 
         return loss_dict
