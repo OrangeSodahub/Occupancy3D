@@ -315,7 +315,7 @@ class OccHead(nn.Module):
         loss_dict = {}
         for i, pred_camera in enumerate(preds_dicts['occ_preds_img']):
 
-            ratio = 2**(len(pred_camera) - 1 - i)
+            ratio = 2**(len(preds_dicts['occ_preds_img']) - 1 - i)
 
             # `voxel_semantics` has the highest resolution
             # Here we downsample the `voxel_semantics` to generate low level resolution labels
