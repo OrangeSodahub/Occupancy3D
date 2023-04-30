@@ -65,19 +65,22 @@ model = dict(
         point_cloud_range=point_cloud_range,
         voxel_size=[0.1, 0.1, 0.1],  # xy size follow centerpoint
         max_voxels=(90000, 120000)),
-    pts_voxel_encoder=dict(type='HardSimpleVFE', num_features=5),
+    # mean VFE used in SECOND
+    pts_voxel_encoder=dict(type='HardSimpleVFE', num_features=4),
     pts_middle_encoder=dict(
         type='SparseLiDAREnc8x',
+        # input channels equals to num_features of VFE
         input_channel=4,
         base_channel=16,
-        # feature dim = 128, equals to the image feature dim at the last level
-        out_channel=_dim_[0],
+        # equals to the fused image feature dim at the last level
+        out_channel=32,
         norm_cfg=dict(type='SyncBN', requires_grad=True),
-        sparse_shape_xyz=[1024, 1024, 80],  # hardcode, xy size follow centerpoint
+        sparse_shape_xyz=[1600, 1600, 80],  # modified by 200 * 8 = 1600
         ),
     occ_fuser=dict(
         type='VisFuser',
-        embed_dims=_dim_,
+        # single scale
+        embed_dims=[32],
     ),
     # TODO: encoder backbone and fpn
     # after the feature fusion?
@@ -109,6 +112,7 @@ model = dict(
         out_indices=[0, 2, 4, 6],
         upsample_strides=[1, 2, 1, 2, 1, 2, 1],
         embed_dims=_dim_,
+        single_scale_fusion=True,
         img_channels=[512, 512, 512],
         use_semantic=use_semantic,
         use_mask=use_mask,
