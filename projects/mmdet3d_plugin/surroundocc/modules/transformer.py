@@ -57,6 +57,7 @@ class PerceptionTransformer(BaseModule):
         self.two_stage_num_proposals = two_stage_num_proposals
         self.init_layers()
         self.rotate_center = rotate_center
+        self.reference_points = nn.Linear(self.embed_dims, 3)
 
     def init_layers(self):
         """Initialize layers of the Detr3DTransformer."""
@@ -78,6 +79,7 @@ class PerceptionTransformer(BaseModule):
                     m.init_weights()
         normal_(self.level_embeds)
         normal_(self.cams_embeds)
+        xavier_init(self.reference_points, distribution='uniform', bias=0.)
 
     @auto_fp16(apply_to=('mlvl_feats', 'volume_queries'))
     def forward(
