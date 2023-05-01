@@ -47,7 +47,7 @@ class LoadOccupancy(object):
 
 @PIPELINES.register_module()
 class LoadOccPointsFromFile(LoadPointsFromFile):
-    def __init__(self, coord_type, load_dim=6, use_dim=..., shift_height=False, use_color=False, file_client_args=...):
+    def __init__(self, coord_type, load_dim=6, use_dim=[0, 1, 2], shift_height=False, use_color=False, file_client_args=dict(backend='disk')):
         super().__init__(coord_type, load_dim, use_dim, shift_height, use_color, file_client_args)
 
     def __call__(self, results):
@@ -76,6 +76,11 @@ class LoadOccPointsFromFile(LoadPointsFromFile):
                     points.shape[1] - 1,
                 ]))
 
+        # transform points to ego vehicle coord
+        ego2lidar = results['ego2lidar']
+        lidar2ego = np.linalg.inv(ego2lidar)
+        points[:, :3] = points[:, :3] @ lidar2ego.T
+        
         points_class = get_points_type(self.coord_type)
         points = points_class(
             points, points_dim=points.shape[-1], attribute_dims=attribute_dims)

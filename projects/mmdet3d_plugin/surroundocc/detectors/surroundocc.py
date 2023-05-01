@@ -112,8 +112,7 @@ class SurroundOcc(MVXTwoStageDetector):
 
         voxel_pts_feats = None
         # extract features of points
-        if self.with_points:
-            assert points is not None
+        if self.with_points and points is not None:
             voxel_pts_feats = self.extract_pts_feat(points)
 
         return img_feats, voxel_pts_feats
@@ -181,7 +180,7 @@ class SurroundOcc(MVXTwoStageDetector):
         output = self.simple_test(
             img_metas, img, **kwargs)
         
-        pred_occ = output['occ_preds']
+        pred_occ = output['occ_preds_img']
 
         # `pred_occ` got multi-scale pred results
         # Here we only use the last one with shape of (200, 200, 16)
@@ -210,7 +209,7 @@ class SurroundOcc(MVXTwoStageDetector):
 
     def simple_test(self, img_metas, img=None, rescale=False):
         """Test function without augmentaiton."""
-        img_feats = self.extract_feat(img=img, img_metas=img_metas)
+        img_feats, _ = self.extract_feat(img=img, img_metas=img_metas)
 
         bbox_list = [dict() for i in range(len(img_metas))]
         output = self.simple_test_pts(
