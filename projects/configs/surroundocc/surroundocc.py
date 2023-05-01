@@ -11,7 +11,7 @@ plugin_dir = 'projects/mmdet3d_plugin/'
 point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
 occ_size = [200, 200, 16]
 use_semantic = True
-use_mask = False
+use_mask = True
 
 img_norm_cfg = dict(
     mean=[103.530, 116.280, 123.675], std=[1.0, 1.0, 1.0], to_rgb=False)
@@ -103,7 +103,15 @@ model = dict(
                     conv_num=2,
                     operation_order=('cross_attn', 'norm',
                                      'ffn', 'norm', 'conv')))),
-),
+    ce_loss_cfg=dict(
+        type='CrossEntropyLoss',
+        use_sigmoid=False,
+        class_weight=None,
+        loss_weight=1.0),
+    geo_loss=True,
+    sem_loss=True,
+    use_mask=use_mask,
+    ),
 )
 
 dataset_type = 'CustomNuScenesOccDataset'
@@ -118,7 +126,7 @@ train_pipeline = [
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-    dict(type='CustomCollect3D', keys=[ 'img', 'voxel_semantics', 'mask_lidar', 'mask_camera'])
+    dict(type='CustomCollect3D', keys=[ 'img', 'voxel_semantics', 'mask_camera'])
 ]
 
 test_pipeline = [

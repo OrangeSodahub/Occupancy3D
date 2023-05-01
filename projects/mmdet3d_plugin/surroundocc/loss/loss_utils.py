@@ -3,15 +3,15 @@ import torch.nn as nn
 import torch.nn.functional as F
 import pdb
 
-def multiscale_supervision(voxel_semantics, ratio, gt_shape, original_coords):
+def multiscale_supervision(voxel_semantics, ratio, gt_shape, original_coords, mask_camera, use_mask=False):
     '''
     change ground truth shape as (B, W, H, Z) for each level supervision
     '''
 
     # `gt_shape: (bs, num_classes, W, H, Z)`
     # `gt: (bs, W, H, Z)`
-    gt = torch.zeros([gt_shape[0], gt_shape[2], gt_shape[3], gt_shape[4]]).to(voxel_semantics.device).type(torch.float) 
-    # TODO: verify, 0 or 17?
+    gt = torch.zeros([gt_shape[0], gt_shape[2], gt_shape[3], gt_shape[4]]).to(voxel_semantics.device).long()
+    mask = gt.clone() if use_mask else None
     # In the dataset provided by CVPR2023 challenge, all the voxels
     # which has no labels (0-16) are labeled as 17 (free or empty)
     gt += 17
@@ -24,10 +24,14 @@ def multiscale_supervision(voxel_semantics, ratio, gt_shape, original_coords):
         downsampled_coords = torch.div(voxel_semantics_with_coords[:, :3].long(), ratio, rounding_mode='floor')
         gt[i, downsampled_coords[:, 0], downsampled_coords[:, 1], downsampled_coords[:, 2]] = \
                                                                             voxel_semantics_with_coords[:, 3]
+        # downsample the mask camera
+        if mask is not None:
+            mask_camera_with_coords = torch.vstack([original_coords.T, mask_camera[i].reshape(-1)]).T
+            mask[i, downsampled_coords[:, 0], downsampled_coords[:, 1], downsampled_coords[:, 2]] = \
+                                                                            mask_camera_with_coords[:, 3]
+    return gt, mask
 
-    return gt
-
-def geo_scal_loss(pred, ssc_target, semantic=True):
+def geo_scal_loss(pred, ssc_target, mask, semantic=True):
 
     # Get softmax probabilities
     if semantic:
@@ -40,7 +44,6 @@ def geo_scal_loss(pred, ssc_target, semantic=True):
     nonempty_probs = 1 - empty_probs
 
     # Remove unknown voxels
-    mask = ssc_target != 255
     nonempty_target = ssc_target != 17
     nonempty_target = nonempty_target[mask].float()
     nonempty_probs = nonempty_probs[mask]
@@ -57,12 +60,11 @@ def geo_scal_loss(pred, ssc_target, semantic=True):
     )
 
 
-def sem_scal_loss(pred, ssc_target):
+def sem_scal_loss(pred, ssc_target, mask):
     # Get softmax probabilities
     pred = F.softmax(pred, dim=1)
     loss = 0
     count = 0
-    mask = ssc_target != 255
     n_classes = pred.shape[1]
     for i in range(0, n_classes):
 
