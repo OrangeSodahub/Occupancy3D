@@ -11,7 +11,7 @@ plugin_dir = 'projects/mmdet3d_plugin/'
 point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
 occ_size = [200, 200, 16]
 use_semantic = True
-use_mask = False
+use_mask = True
 
 img_norm_cfg = dict(
     mean=[103.530, 116.280, 123.675], std=[1.0, 1.0, 1.0], to_rgb=False)
