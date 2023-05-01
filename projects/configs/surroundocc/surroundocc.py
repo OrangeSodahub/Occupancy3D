@@ -19,6 +19,10 @@ img_norm_cfg = dict(
 class_names =  ['other', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehicle', 'motorcycle',
                 'pedestrian', 'traffic_cone', 'trailer', 'truck', 'driveable_surface',
                 'other_flat', 'sidewalk', 'terrain', 'manmade', 'vegetation', 'free']
+class_weight = [0.05597741, 0.05857186, 0.07012177, 0.05821387, 0.05237201,
+                0.06030229, 0.0685634 , 0.05849956, 0.06577655, 0.05758299,
+                0.05514106, 0.04643295, 0.05634901, 0.04929424, 0.04858398,
+                0.04741097, 0.04701869, 0.03516321]
 
 input_modality = dict(
     use_lidar=False,
@@ -106,11 +110,10 @@ model = dict(
     ce_loss_cfg=dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,
-        class_weight=None,
+        class_weight=class_weight,
         loss_weight=1.0),
     geo_loss=True,
     sem_loss=True,
-    use_mask=use_mask,
     ),
 )
 

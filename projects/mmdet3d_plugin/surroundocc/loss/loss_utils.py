@@ -17,7 +17,6 @@ def multiscale_supervision(voxel_semantics, ratio, gt_shape, original_coords, ma
     gt += 17
     for i in range(gt.shape[0]):
         # Roughly calculate the downsampled label
-        # TODO: verify, remove free
         original_coords = original_coords.to(voxel_semantics.device)
         voxel_semantics_with_coords = torch.vstack([original_coords.T, voxel_semantics[i].reshape(-1)]).T
         voxel_semantics_with_coords = voxel_semantics_with_coords[voxel_semantics_with_coords[:, 3] < 17]
@@ -27,6 +26,7 @@ def multiscale_supervision(voxel_semantics, ratio, gt_shape, original_coords, ma
         # downsample the mask camera
         if mask is not None:
             mask_camera_with_coords = torch.vstack([original_coords.T, mask_camera[i].reshape(-1)]).T
+            downsampled_coords = torch.div(mask_camera_with_coords[:, :3].long(), ratio, rounding_mode='floor')
             mask[i, downsampled_coords[:, 0], downsampled_coords[:, 1], downsampled_coords[:, 2]] = \
                                                                             mask_camera_with_coords[:, 3]
     return gt, mask

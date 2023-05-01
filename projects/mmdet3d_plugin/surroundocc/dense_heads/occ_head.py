@@ -19,12 +19,6 @@ from mmcv.cnn import build_conv_layer, build_norm_layer, build_upsample_layer
 from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import multiscale_supervision, geo_scal_loss, sem_scal_loss
 
 
-nusc_class_frequencies = np.array(
-    [57330862, 25985376, 1561108, 28862014, 196106643, 15920504, 2158753,
-     26539491, 4004729, 34838681, 75173306, 2255027978, 50959399, 646022466,
-     869055679, 1446141335, 1724391378, 2242961742295])
-
-
 @HEADS.register_module()
 class OccHead(nn.Module): 
     def __init__(self,
@@ -70,8 +64,6 @@ class OccHead(nn.Module):
         self.transformer_template = transformer_template
 
         assert ce_loss_cfg is not None
-        class_weight = 1 / np.log(nusc_class_frequencies + 1e-5)
-        ce_loss_cfg.update(class_weight=class_weight)
         self.ce_loss = build_loss(ce_loss_cfg)
         self.geo_loss = geo_loss
         self.sem_loss = sem_loss
@@ -346,7 +338,7 @@ class OccHead(nn.Module):
                 else:
                     num_total_samples=mask.sum()
                     loss_occ_i = self.ce_loss(pred.permute(0, 2, 3, 4, 1).reshape(-1, self.num_classes),
-                                                gt.long().reshape(-1), mask_camera, avg_factor=num_total_samples)
+                                                gt.long().reshape(-1), mask.reshape(-1), avg_factor=num_total_samples)
                     if self.geo_loss:
                         loss_occ_i += sem_scal_loss(pred, gt.long(), mask)
                     if self.sem_loss:
