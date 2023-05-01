@@ -6,31 +6,27 @@
 
 import copy
 import torch
+import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
 
 from mmdet.models import HEADS
-from mmcv.runner import force_fp32, auto_fp16
-import numpy as np
-import mmcv
-import cv2 as cv
-from projects.mmdet3d_plugin.models.utils.visual import save_tensor
-from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import multiscale_supervision, geo_scal_loss, sem_scal_loss
-from mmcv.cnn import build_conv_layer, build_norm_layer, build_upsample_layer
+from mmdet.models.builder import build_loss
 from mmdet.models.utils import build_transformer
+from mmcv.runner import force_fp32, auto_fp16
 from mmcv.cnn.utils.weight_init import constant_init
-import os
-from torch.autograd import Variable
-try:
-    from itertools import  ifilterfalse
-except ImportError: # py3k
-    from itertools import  filterfalse as ifilterfalse
+from mmcv.cnn import build_conv_layer, build_norm_layer, build_upsample_layer
+from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import multiscale_supervision, geo_scal_loss, sem_scal_loss
+
 
 @HEADS.register_module()
 class OccHead(nn.Module): 
     def __init__(self,
                  *args,
                  transformer_template=None,
+                 ce_loss_cfg=None,
+                 geo_loss=False,
+                 sem_loss=False,
                  num_classes=18,
                  volume_h=[100, 50, 25],
                  volume_w=[100, 50, 25],
@@ -66,6 +62,11 @@ class OccHead(nn.Module):
         self.upsample_strides = upsample_strides
         self.out_indices = out_indices
         self.transformer_template = transformer_template
+
+        assert ce_loss_cfg is not None
+        self.ce_loss = build_loss(ce_loss_cfg)
+        self.geo_loss = geo_loss
+        self.sem_loss = sem_loss
 
         self._init_layers()
 
@@ -306,9 +307,6 @@ class OccHead(nn.Module):
                 loss_dict['loss_occ_{}'.format(i)] = loss_occ_i
         else:
             pred = preds_dicts['occ_preds']
-            criterion = nn.CrossEntropyLoss(
-                ignore_index=255, reduction="mean"
-            )
             
             loss_dict = {}
             for i in range(len(preds_dicts['occ_preds'])):
@@ -318,17 +316,33 @@ class OccHead(nn.Module):
 
                 # `voxel_semantics` has the highest resolution
                 # Here we downsample the `voxel_semantics` to generate low level resolution labels
-                gt = multiscale_supervision(voxel_semantics.clone(), ratio, preds_dicts['occ_preds'][i].shape, self.coords_grid)
+                gt, mask = multiscale_supervision(
+                    voxel_semantics.clone(),
+                    ratio,
+                    preds_dicts['occ_preds'][i].shape,
+                    self.coords_grid,
+                    mask_camera,
+                    self.use_mask)
+
                 # align with the pred
                 gt = gt.permute(0, 2, 1, 3)
+                mask = mask.permute(0, 2, 1, 3) if mask is not None else None
                 
                 if not self.use_mask:
-                    loss_occ_i = (criterion(pred, gt.long()) + sem_scal_loss(pred, gt.long()) + geo_scal_loss(pred, gt.long()))
+                    loss_occ_i = self.ce_loss(pred.permute(0, 2, 3, 4, 1).reshape(-1, self.num_classes),
+                                                                                        gt.long().reshape(-1))
+                    if self.geo_loss:
+                        loss_occ_i += sem_scal_loss(pred, gt.long())
+                    if self.sem_loss:
+                        loss_occ_i += geo_scal_loss(pred, gt.long())
                 else:
-                    # TODO: Multi-scale mask camera
-                    num_total_samples=mask_camera.sum()
-                    loss_occ_i = (criterion(pred, gt.long(), mask_camera, avg_factor=num_total_samples) \
-                        + sem_scal_loss(pred, gt.long()) + geo_scal_loss(pred, gt.long()))
+                    num_total_samples=mask.sum()
+                    loss_occ_i = self.ce_loss(pred.permute(0, 2, 3, 4, 1).reshape(-1, self.num_classes),
+                                                gt.long().reshape(-1), mask.reshape(-1), avg_factor=num_total_samples)
+                    if self.geo_loss:
+                        loss_occ_i += sem_scal_loss(pred, gt.long(), mask)
+                    if self.sem_loss:
+                        loss_occ_i += geo_scal_loss(pred, gt.long(), mask)
                 
                 # focal weight
                 loss_occ_i = loss_occ_i * ((0.5)**(len(preds_dicts['occ_preds']) - 1 -i))

@@ -62,12 +62,12 @@ def get_grid_coords(dims, resolution, ratio):
 
 def draw(
     voxels,                         # semantic occupancy predictions
-    mask_lidar,
     mask_camera,
     voxel_origin=[-40, -40, -1],      # the original of the whole space
     voxel_size=[0.4, 0.4, 0.4],     # voxel size in the real world
     ratio=1,                        # scale
     remove_free=False,
+    use_mask=False,
 ):
     h, w, z = voxels.shape
 
@@ -76,11 +76,16 @@ def draw(
 
     if remove_free:
         voxels = np.vstack([grid_index.T, voxels.reshape(-1)]).T
+        masks = np.vstack([grid_index.T, mask_camera.reshape(-1)]).T
         voxels = voxels[voxels[:, 3] < 17]
         grid_index = voxels[:, :3] // ratio
+        grid_index_mask = masks[:, :3] // ratio
         semantics_index = np.zeros([h // ratio, w // ratio, z // ratio])
+        masks_index = semantics_index.copy()
         semantics_index[grid_index[:, 0], grid_index[:, 1], grid_index[:, 2]] = voxels[:, 3]
+        masks_index[grid_index_mask[:, 0], grid_index_mask[:, 1], grid_index_mask[:, 2]] = masks[:, 3]
         grid_coords[:, :3] += np.array(voxel_origin, dtype=np.float32).reshape([1, 3])
+        masks = np.vstack([grid_coords.T, masks_index.reshape(-1)]).T
         grid_coords = np.vstack([grid_coords.T, semantics_index.reshape(-1)]).T
     else:
         semantics_index[grid_index[:, 0], grid_index[:, 1], grid_index[:, 2]] = \
@@ -94,11 +99,8 @@ def draw(
 
     # Remove empty and unknown voxels (label==0)
     fov_voxels = fov_grid_coords
-    # TODO: mask in ratio != 1
-    if False:
-        fov_voxels = fov_grid_coords[
-            (mask_camera.reshape(-1) == 1) & (mask_lidar.reshape(-1) == 1), :
-        ]
+    if use_mask:
+        fov_voxels = fov_grid_coords[(masks[:, 3] == 1)]
     fov_voxels = fov_voxels[
         (fov_voxels[:, 3] > 0) & (fov_voxels[:, 3] < 17)
     ]
@@ -140,4 +142,4 @@ if __name__ == '__main__':
     occ_path = './data/labels.npz'
     occ = np.load(open(occ_path, "rb"))
     ratio = 1
-    draw(occ['semantics'], occ['mask_lidar'], occ['mask_camera'], ratio=ratio, remove_free=True)
+    draw(occ['semantics'], occ['mask_camera'], ratio=ratio, remove_free=True, use_mask=True)

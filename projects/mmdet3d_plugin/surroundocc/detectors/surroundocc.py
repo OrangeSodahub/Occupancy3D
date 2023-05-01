@@ -155,7 +155,6 @@ class SurroundOcc(MVXTwoStageDetector):
                       img_metas=None,
                       img=None,
                       voxel_semantics=None,
-                      mask_lidar=None,
                       mask_camera=None,
                       depth_gt=None,
                       ):
