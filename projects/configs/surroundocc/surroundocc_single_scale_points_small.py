@@ -77,7 +77,7 @@ model = dict(
         ),
     occ_fuser=dict(
         type='VisFuser',
-        embed_dims=16,
+        embed_dims=[16],
     ),
     # TODO: encoder backbone and fpn
     # after the feature fusion?
@@ -166,7 +166,7 @@ test_pipeline = [
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-    dict(type='CustomCollect3D', keys=['img', 'voxel_semantics', 'mask_camera'])
+    dict(type='CustomCollect3D', keys=['img'])
 ]
 
 find_unused_parameters = True
