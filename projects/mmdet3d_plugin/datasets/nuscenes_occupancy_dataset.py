@@ -118,7 +118,12 @@ class CustomNuScenesOccDataset(NuScenesDataset):
                 ))
 
         if self.modality['use_lidar']:
-            input_dict['lidar_path'] = info['lidar_path']
+            input_dict.update(
+                dict(
+                    lidar_path=info['lidar_path'],
+                    lidar2ego_rotation = info['lidar2ego_rotation'],
+                    lidar2ego_translation = info['lidar2ego_translation']
+                    ))
 
         if not self.test_mode:
             annos = self.get_ann_info(index)

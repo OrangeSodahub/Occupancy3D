@@ -3,6 +3,8 @@ import os
 import numpy as np
 from mmdet3d.datasets.builder import PIPELINES
 from mmdet3d.core.points import get_points_type
+from nuscenes.utils.geometry_utils import Quaternion
+from nuscenes.utils.data_classes import LidarPointCloud
 from mmdet3d.datasets.pipelines.loading import LoadPointsFromFile
 
 
@@ -45,6 +47,12 @@ class LoadOccupancy(object):
         return repr_str
 
 
+def transform(pc, lidar2ego_trans, lidar2ego_rots):
+    pc = LidarPointCloud(pc.T)
+    pc.rotate(Quaternion(lidar2ego_rots).rotation_matrix)
+    pc.translate(np.array(lidar2ego_trans))
+    return pc.points.T
+
 @PIPELINES.register_module()
 class LoadOccPointsFromFile(LoadPointsFromFile):
     def __init__(self, coord_type, load_dim=6, use_dim=[0, 1, 2], shift_height=False, use_color=False, file_client_args=dict(backend='disk')):
@@ -77,9 +85,7 @@ class LoadOccPointsFromFile(LoadPointsFromFile):
                 ]))
 
         # transform points to ego vehicle coord
-        ego2lidar = results['ego2lidar']
-        lidar2ego = np.linalg.inv(ego2lidar)
-        points[:, :3] = points[:, :3] @ lidar2ego.T
+        points[:, :4] = transform(points[:, :4], results['lidar2ego_translation'], results['lidar2ego_rotation'])
         
         points_class = get_points_type(self.coord_type)
         points = points_class(
