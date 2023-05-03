@@ -105,3 +105,31 @@ def sem_scal_loss(pred, ssc_target, mask):
             loss += loss_class
     return loss / count
 
+
+def depth_loss(pred, target):
+    pass
+
+
+def BCE_ssc_loss(pred, target, alpha, mask_camera):
+    class_weights = torch.zeros((2)).float().to(pred.device)
+
+    # binary classification
+    zeros_mask = (target == 17)
+    target[zeros_mask] = 0
+    target[~zeros_mask] = 1
+
+    # TODO: remove outside camera range
+    # mask_camera = mask_camera.bool()
+    # pred = pred[mask_camera, :]
+    # target = target[mask_camera]
+    
+    class_weights[0] = 1-alpha  # empty
+    class_weights[1] = alpha    # occupied
+
+    criterion = nn.CrossEntropyLoss(
+        weight=class_weights, ignore_index=255, reduction="none"
+    )
+    loss = criterion(pred, target.long())
+    loss_mean = torch.mean(loss)
+
+    return loss_mean
