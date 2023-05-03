@@ -21,6 +21,36 @@ class_names =  ['other', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehic
                 'pedestrian', 'traffic_cone', 'trailer', 'truck', 'driveable_surface',
                 'other_flat', 'sidewalk', 'terrain', 'manmade', 'vegetation', 'free']
 
+data_config = {
+    'cams': [
+        'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
+        'CAM_BACK', 'CAM_BACK_RIGHT'
+    ],
+    'Ncams':
+    6,
+    'input_size': (256, 704),
+    'src_size': (900, 1600),
+
+    # Augmentation
+    'resize': (-0.06, 0.11),
+    'rot': (-5.4, 5.4),
+    'flip': True,
+    'crop_h': (0.0, 0.0),
+    'resize_test': 0.00,
+}
+
+# Model
+grid_config = {
+    'x': [-40, 40, 0.4],
+    'y': [-40, 40, 0.4],
+    'z': [-1, 5.4, 0.4],
+    'depth': [1.0, 45.0, 0.5],
+}
+
+numC_Trans = 64
+
+multi_adj_frame_id_cfg = (1, 1+1, 1)
+
 input_modality = dict(
     use_lidar=False,
     use_camera=True,
@@ -53,25 +83,33 @@ model = dict(
         add_extra_convs='on_output',
         num_outs=3,
         relu_before_extra_convs=True),
-    pts_backbone=dict(
-        type='BaseDepthNet',
-        occ_size=occ_size,       # (200, 200, 16)
-        volume_size=volume_size, # (100, 100, 8)
-        pc_range=point_cloud_range,
-        x_bound=[-40, 40, 0.4],
-        y_bound=[-40, 40, 0.4],
-        z_bound=[-1, 5.4, 0.4],
-        # TODO: verify d_bound
-        d_bound=[2, 58, 0.5],
-        output_channels=80,
-        depth_net_conf=dict(
-            in_channels=512,
-            mid_channels=512),
-        agg_voxel_mode='mean',
-        ssc_net_conf=dict(
-            class_num=2,
-            input_dimensions=volume_size, # (100, 100, 8)
-            out_scale="1_2")),
+    img_view_transformer=dict(
+        type='LSSViewTransformerBEVStereo',
+        grid_config=grid_config,
+        input_size=data_config['input_size'],
+        # equals to `out_channels` in `img_neck
+        in_channels=512,
+        out_channels=numC_Trans,
+        sid=False,
+        collapse_z=False,
+        loss_depth_weight=0.05,
+        depthnet_cfg=dict(use_dcn=False,
+                          aspp_mid_channels=96,
+                          stereo=True,
+                          bias=5.),
+        downsample=16),
+    img_bev_encoder_backbone=dict(
+        type='CustomResNet3D',
+        numC_input=numC_Trans * (len(range(*multi_adj_frame_id_cfg))+1),
+        num_layer=[1, 2, 4],
+        with_cp=False,
+        num_channels=[numC_Trans,numC_Trans*2,numC_Trans*4],
+        stride=[1,2,2],
+        backbone_output_ids=[0,1,2]),
+    img_bev_encoder_neck=dict(type='LSSFPN3D',
+                              in_channels=numC_Trans*7,
+                              out_channels=numC_Trans),
+    # TODO: add pts_bbox_head
 )
 
 dataset_type = 'CustomNuScenesOccDataset'
@@ -81,15 +119,14 @@ occ_gt_data_root='data/occ3d-nus'
 depth_gt_data_root='data/depth_gt'
 
 train_pipeline = [
-    dict(type='LoadMultiViewImageFromFiles', to_float32=True),
-    dict(type='PhotoMetricDistortionMultiViewImage'),
+    dict(type='PrepareImageInputs', is_train=True, data_config=data_config, sequential=True),
     dict(type='LoadOccupancy', data_root=occ_gt_data_root, use_semantic=use_semantic),
     # TODO: fix depth gt
     # dict(type='LoadDepthGT', data_root=depth_gt_data_root),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-    dict(type='CustomCollect3D', keys=['img', 'voxel_semantics', 'mask_lidar', 'mask_camera', 'depth_gt'])
+    dict(type='CustomCollect3D', keys=['img_inputs', 'voxel_semantics', 'mask_camera', 'depth_gt'])
 ]
 
 test_pipeline = [
@@ -97,8 +134,15 @@ test_pipeline = [
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-    dict(type='CustomCollect3D', keys=[ 'img'])
+    dict(type='CustomCollect3D', keys=['img_inputs'])
 ]
+
+share_data_config = dict(
+    stereo=True,
+    filter_empty_gt=False,
+    img_info_prototype='bevdet4d',
+    multi_adj_frame_id_cfg=multi_adj_frame_id_cfg,
+)
 
 find_unused_parameters = True
 data = dict(
@@ -140,6 +184,9 @@ data = dict(
     shuffler_sampler=dict(type='DistributedGroupSampler'),
     nonshuffler_sampler=dict(type='DistributedSampler')
 )
+
+for key in ['val', 'train', 'test']:
+    data[key].update(share_data_config)
 
 optimizer = dict(
     type='AdamW',

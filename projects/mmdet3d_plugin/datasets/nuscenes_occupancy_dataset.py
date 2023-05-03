@@ -23,7 +23,8 @@ class CustomNuScenesOccDataset(NuScenesDataset):
     This datset only add camera intrinsics and extrinsics to the results.
     """
 
-    def __init__(self, occ_size, pc_range, use_semantic=False, classes=None, overlap_test=False, eval_fscore=False, *args, **kwargs):
+    def __init__(self, occ_size, pc_range, use_semantic=False, classes=None, overlap_test=False, eval_fscore=False,
+                 stereo=False, filter_empty_gt=False, img_info_prototype='bevdet4d', multi_adj_frame_id_cfg=None, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.overlap_test = overlap_test
         self.occ_size = occ_size
@@ -31,6 +32,11 @@ class CustomNuScenesOccDataset(NuScenesDataset):
         self.use_semantic = use_semantic
         self.class_names = classes
         self.eval_fscore = eval_fscore
+
+        self.stereo = stereo
+        self.filter_empty_gt = filter_empty_gt
+        self.img_info_prototype = img_info_prototype
+        self.multi_adj_frame_id_cfg = multi_adj_frame_id_cfg
         self._set_group_flag()
         
     def prepare_train_data(self, index):
@@ -71,12 +77,16 @@ class CustomNuScenesOccDataset(NuScenesDataset):
         info = self.data_infos[index]
         # standard protocal modified from SECOND.Pytorch
         input_dict = dict(
+            sample_idx = info['token'],
+            timestamp = info['timestamp'] / 1e6,
             occ_path = info['occ_gt_path'],
+            pts_filename = info['lidar_path'],
             depth_path = info.get('depth_gt_path', None),
             occ_size = np.array(self.occ_size),
             pc_range = np.array(self.pc_range)
         )
 
+        # mmcv format
         lidar2ego_rotation = info['lidar2ego_rotation']
         lidar2ego_translation = info['lidar2ego_translation']
         ego2lidar = transform_matrix(translation=lidar2ego_translation, rotation=Quaternion(lidar2ego_rotation),
@@ -122,7 +132,30 @@ class CustomNuScenesOccDataset(NuScenesDataset):
             annos = self.get_ann_info(index)
             input_dict['ann_info'] = annos
 
+        # bevdet4d format
+        # to meet the process of bevdet4d
+        if self.img_info_prototype == 'bevdet4d':
+            input_dict.update(curr=info)
+            info_adj_list = self.get_adj_info(info, index)
+            input_dict.update(dict(adjacent=info_adj_list))
+
         return input_dict
+
+    def get_adj_info(self, info, index):
+        info_adj_list = []
+        adj_id_list = list(range(*self.multi_adj_frame_id_cfg))
+        if self.stereo:
+            assert self.multi_adj_frame_id_cfg[0] == 1
+            assert self.multi_adj_frame_id_cfg[2] == 1
+            adj_id_list.append(self.multi_adj_frame_id_cfg[1])
+        for select_id in adj_id_list:
+            select_id = max(index - select_id, 0)
+            if not self.data_infos[select_id]['scene_token'] == info[
+                    'scene_token']:
+                info_adj_list.append(info)
+            else:
+                info_adj_list.append(self.data_infos[select_id])
+        return info_adj_list
 
     def __getitem__(self, idx):
         """Get item from infos according to the given index.

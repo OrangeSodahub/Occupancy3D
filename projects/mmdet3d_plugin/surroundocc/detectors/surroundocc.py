@@ -4,13 +4,13 @@
 #  Modified by Zhiqi Li
 # ---------------------------------------------
 
+import os
 import torch
-import mmdet3d
 import numpy as np
-import time, yaml, os
 
-from mmcv.runner import force_fp32, auto_fp16
 from mmdet.models import DETECTORS
+from mmcv.runner import auto_fp16, force_fp32
+from mmdet.models.builder import build_neck, build_backbone
 from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
 from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 
@@ -18,13 +18,15 @@ from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 @DETECTORS.register_module()
 class SurroundOcc(MVXTwoStageDetector):
     def __init__(self,
-                 stage=None,
                  use_grid_mask=False,
                  pts_voxel_layer=None,
                  pts_voxel_encoder=None,
                  pts_middle_encoder=None,
                  pts_fusion_layer=None,
                  img_backbone=None,
+                 img_view_transformer=None,
+                 img_bev_encoder_backbone=None,
+                 img_encoder_neck=None,
                  pts_backbone=None,
                  img_neck=None,
                  pts_neck=None,
@@ -45,17 +47,80 @@ class SurroundOcc(MVXTwoStageDetector):
                              img_backbone, pts_backbone, img_neck, pts_neck,
                              pts_bbox_head, img_roi_head, img_rpn_head,
                              train_cfg, test_cfg, pretrained)
-        assert stage in ['stage1', 'stage2']
-        self.stage = stage
         self.grid_mask = GridMask(
             True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
+        self.img_view_transformer = build_neck(img_view_transformer)
+        self.img_bev_encoder_backbone = build_backbone(img_bev_encoder_backbone)
+        self.img_bev_encoder_neck = build_neck(img_encoder_neck)
+
         self.use_grid_mask = use_grid_mask
         self.fp16_enabled = False
 
         self.use_semantic = use_semantic
         self.is_vis = is_vis
+
+        # BEVDet4D
+        num_adj = 1
+        self.num_frame = num_adj + 1
+        self.with_prev = True
+        self.align_after_view_transfromation = False
+        self.extra_ref_frames = 1
+        self.num_frame += self.extra_ref_frames
                   
-    def extract_img_feat(self, img, img_metas, len_queue=None):
+    def prepare_inputs(self, inputs, stereo=False):
+        # split the inputs into each frame
+        B, N, C, H, W = inputs[0].shape
+        N = N // self.num_frame
+        imgs = inputs[0].view(B, N, self.num_frame, C, H, W)
+        imgs = torch.split(imgs, 1, 2)
+        imgs = [t.squeeze(2) for t in imgs]
+        sensor2egos, ego2globals, intrins, post_rots, post_trans, bda = \
+            inputs[1:7]
+
+        sensor2egos = sensor2egos.view(B, self.num_frame, N, 4, 4)
+        ego2globals = ego2globals.view(B, self.num_frame, N, 4, 4)
+
+        # calculate the transformation from sweep sensor to key ego
+        keyego2global = ego2globals[:, 0, 0, ...].unsqueeze(1).unsqueeze(1)
+        global2keyego = torch.inverse(keyego2global.double())
+        sensor2keyegos = \
+            global2keyego @ ego2globals.double() @ sensor2egos.double()
+        sensor2keyegos = sensor2keyegos.float()
+
+        curr2adjsensor = None
+        if stereo:
+            sensor2egos_cv, ego2globals_cv = sensor2egos, ego2globals
+            sensor2egos_curr = \
+                sensor2egos_cv[:, :self.temporal_frame, ...].double()
+            ego2globals_curr = \
+                ego2globals_cv[:, :self.temporal_frame, ...].double()
+            sensor2egos_adj = \
+                sensor2egos_cv[:, 1:self.temporal_frame + 1, ...].double()
+            ego2globals_adj = \
+                ego2globals_cv[:, 1:self.temporal_frame + 1, ...].double()
+            curr2adjsensor = \
+                torch.inverse(ego2globals_adj @ sensor2egos_adj) \
+                @ ego2globals_curr @ sensor2egos_curr
+            curr2adjsensor = curr2adjsensor.float()
+            curr2adjsensor = torch.split(curr2adjsensor, 1, 1)
+            curr2adjsensor = [p.squeeze(1) for p in curr2adjsensor]
+            curr2adjsensor.extend([None for _ in range(self.extra_ref_frames)])
+            assert len(curr2adjsensor) == self.num_frame
+
+        extra = [
+            sensor2keyegos,
+            ego2globals,
+            intrins.view(B, self.num_frame, N, 3, 3),
+            post_rots.view(B, self.num_frame, N, 3, 3),
+            post_trans.view(B, self.num_frame, N, 3)
+        ]
+        extra = [torch.split(t, 1, 1) for t in extra]
+        extra = [[p.squeeze(1) for p in t] for t in extra]
+        sensor2keyegos, ego2globals, intrins, post_rots, post_trans = extra
+        return imgs, sensor2keyegos, ego2globals, intrins, post_rots, post_trans, \
+               bda, curr2adjsensor                
+
+    def encode_image(self, img, img_metas, len_queue=None):
         """Extract features of images."""
         B = img.size(0)
         if img is not None:
@@ -89,43 +154,100 @@ class SurroundOcc(MVXTwoStageDetector):
                 img_feats_reshaped.append(img_feat.view(B, int(BN / B), C, H, W))
         return img_feats_reshaped
 
+    def prepare_bev_feat(self, img, rot, tran, intrin, post_rot, post_tran,
+                         bda, mlp_input):
+        x = self.encode_image(img)
+        bev_feat, depth = self.img_view_transformer(
+            [x, rot, tran, intrin, post_rot, post_tran, bda, mlp_input])
+        return bev_feat, depth
+
+    @force_fp32()
+    def bev_encoder(self, x):
+        x = self.img_bev_encoder_backbone(x)
+        x = self.img_bev_encoder_neck(x)
+        if type(x) in [list, tuple]:
+            x = x[0]
+        return x
+
+    def extract_img_feat(self, img, img_metas, **kwargs):
+        imgs, sensor2keyegos, ego2globals, intrins, post_rots, post_trans, \
+        bda, curr2adjsensor = self.prepare_inputs(img, stereo=True)
+        """Extract features of images."""
+        bev_feat_list = []
+        depth_key_frame = None
+        feat_prev_iv = None
+        for fid in range(self.num_frame-1, -1, -1):
+            img, sensor2keyego, ego2global, intrin, post_rot, post_tran = \
+                imgs[fid], sensor2keyegos[fid], ego2globals[fid], intrins[fid], \
+                post_rots[fid], post_trans[fid]
+            key_frame = fid == 0
+            extra_ref_frame = fid == self.num_frame-self.extra_ref_frames
+            if key_frame or self.with_prev:
+                if self.align_after_view_transfromation: # False
+                    sensor2keyego, ego2global = sensor2keyegos[0], ego2globals[0]
+                mlp_input = self.img_view_transformer.get_mlp_input(
+                    sensor2keyegos[0], ego2globals[0], intrin,
+                    post_rot, post_tran, bda)
+                inputs_curr = (img, sensor2keyego, ego2global, intrin,
+                               post_rot, post_tran, bda, mlp_input,
+                               feat_prev_iv, curr2adjsensor[fid],
+                               extra_ref_frame)
+                if key_frame:
+                    bev_feat, depth, feat_curr_iv = \
+                        self.prepare_bev_feat(*inputs_curr)
+                    depth_key_frame = depth
+                else:
+                    with torch.no_grad():
+                        bev_feat, depth, feat_curr_iv = \
+                            self.prepare_bev_feat(*inputs_curr)
+                if not extra_ref_frame:
+                    bev_feat_list.append(bev_feat)
+                feat_prev_iv = feat_curr_iv
+        if not self.with_prev:
+            bev_feat_key = bev_feat_list[0]
+            if len(bev_feat_key.shape) == 4:
+                b,c,h,w = bev_feat_key.shape
+                bev_feat_list = \
+                    [torch.zeros([b,
+                                  c * (self.num_frame -
+                                       self.extra_ref_frames - 1),
+                                  h, w]).to(bev_feat_key), bev_feat_key]
+            else:
+                b, c, z, h, w = bev_feat_key.shape
+                bev_feat_list = \
+                    [torch.zeros([b,
+                                  c * (self.num_frame -
+                                       self.extra_ref_frames - 1), z,
+                                  h, w]).to(bev_feat_key), bev_feat_key]
+        if self.align_after_view_transfromation: # False
+            for adj_id in range(self.num_frame-2):
+                bev_feat_list[adj_id] = \
+                    self.shift_feature(bev_feat_list[adj_id],
+                                       [sensor2keyegos[0],
+                                        sensor2keyegos[self.num_frame-2-adj_id]],
+                                       bda)
+        bev_feat = torch.cat(bev_feat_list, dim=1)
+        x = self.bev_encoder(bev_feat)
+        return [x], depth_key_frame
+
     @auto_fp16(apply_to=('img'))
     def extract_feat(self, img, img_metas=None, len_queue=None):
         """Extract features from images and points."""
 
-        img_feats = self.extract_img_feat(img, img_metas, len_queue=len_queue)
+        img_feats, depth = self.extract_img_feat(img, img_metas, len_queue=len_queue)
         
-        return img_feats
+        return img_feats, depth
 
     def forward_pts_train(self,
                           pts_feats,
                           voxel_semantics,
                           mask_camera,
-                          depth_gt,
                           img_metas):
         losses = dict()
-
-        # For now directly use existing depth model to
-        # generate depth map to test the performance
-        if self.stage == 'stage1':
-            assert self.pts_backbone is not None
-            # TODO: predict depth map
-            # TODO: for now only support single frame
-            with_depgh_gt = (depth_gt is not None)
-            ssc_pred, depth_pred = self.pts_backbone(pts_feats, img_metas, with_depgh_gt)
-            loss_inputs = [ssc_pred, depth_pred, voxel_semantics, depth_gt, mask_camera]
-            losses_depth = self.pts_backbone.loss(*loss_inputs)
-            losses.update(losses_depth)
-
-        # predict occ volume
-        # `voxel_semantics` only used in loss calculation
-        # with multi-scale supervision
-        elif self.stage == 'stage2':
-            assert self.pts_bbox_head is not None
-            occ_pred = self.pts_bbox_head(pts_feats, img_metas)
-            loss_inputs = [voxel_semantics, mask_camera, occ_pred]
-            losses_occ = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
-            losses.update(losses_occ)
+        occ_pred = self.pts_bbox_head(pts_feats, img_metas)
+        loss_inputs = [voxel_semantics, mask_camera, occ_pred]
+        losses_occ = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
+        losses.update(losses_occ)
 
         return losses
 
@@ -160,13 +282,17 @@ class SurroundOcc(MVXTwoStageDetector):
                       ):
 
         # extract image features
-        img_feats = self.extract_feat(img=img, img_metas=img_metas)
+        img_feats, depth = self.extract_feat(img=img, img_metas=img_metas)
 
         losses = dict()
-        losses_pts = self.forward_pts_train(img_feats, voxel_semantics, mask_camera,
-                                            depth_gt, img_metas)
+        # depth branch
+        losses_depth = self.img_view_transformer.get_depth_loss(depth_gt, depth)
+        losses.update(losses_depth)
 
-        losses.update(losses_pts)
+        # occ branch
+        # TODO: add feature fuser
+        losses_occ = self.forward_pts_train(img_feats, voxel_semantics, mask_camera, img_metas)
+        losses.update(losses_occ)
         return losses
 
     def forward_test(self, img_metas, img=None, voxel_semantics=None, **kwargs):
