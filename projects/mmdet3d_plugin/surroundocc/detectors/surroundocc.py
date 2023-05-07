@@ -104,7 +104,7 @@ class SurroundOcc(MVXTwoStageDetector):
                           img_metas):
 
         outs = self.pts_bbox_head(
-            pts_feats, img_metas)
+            pts_feats, img_metas, is_train=True)
         # `voxel_semantics` only used in loss calculation
         # with multi-scale supervision
         loss_inputs = [voxel_semantics, mask_camera, outs]
@@ -177,7 +177,7 @@ class SurroundOcc(MVXTwoStageDetector):
         
     def simple_test_pts(self, x, img_metas, rescale=False):
         """Test function"""
-        outs = self.pts_bbox_head(x, img_metas)
+        outs = self.pts_bbox_head(x, img_metas, is_train=False)
 
         return outs
 

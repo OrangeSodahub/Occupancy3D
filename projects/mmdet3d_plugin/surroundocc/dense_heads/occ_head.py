@@ -207,7 +207,7 @@ class OccHead(nn.Module):
                 constant_init(m.conv_offset, 0)
 
     @auto_fp16(apply_to=('mlvl_feats'))
-    def forward(self, mlvl_feats, img_metas):
+    def forward(self, mlvl_feats, img_metas, is_train=False):
 
         # image feature map shape: (B, N, C, H, W)
         bs, num_cam, _, _, _ = mlvl_feats[0].shape
@@ -277,11 +277,13 @@ class OccHead(nn.Module):
         # `self.occ` transform the feature dimension of fused volume feature to `num_classes`
         # `occ_pred: (bs, num_classes, W, H, Z)`
         for i in range(len(outputs)):
+            if not is_train and i != len(outputs) - 1:
+                continue
             occ_pred = self.occ[i](outputs[i])
             occ_preds.append(occ_pred)
        
         outs = {
-            'volume_embed': volume_embed,
+            'volume_embed': volume_embed if is_train else None,
             'occ_preds': occ_preds,
         }
 
