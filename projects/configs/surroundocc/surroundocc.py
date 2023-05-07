@@ -146,6 +146,7 @@ data = dict(
     samples_per_gpu=1,
     workers_per_gpu=4,
     train=dict(
+            is_train=True,
             type=dataset_type,
             data_root=data_root,
             ann_file='data/occ3d-nus/occ_infos_temporal_train.pkl',
@@ -159,6 +160,7 @@ data = dict(
             classes=class_names,
             box_type_3d='LiDAR'),
     val=dict(type=dataset_type,
+            is_train=False,
             data_root=data_root,
             ann_file='data/occ3d-nus/occ_infos_temporal_val.pkl',
             pipeline=test_pipeline,  
@@ -169,6 +171,7 @@ data = dict(
             modality=input_modality,
             eval_fscore=True),
     test=dict(type=dataset_type,
+            is_train=False,
             data_root=data_root,
             ann_file='data/occ3d-nus/occ_infos_temporal_val.pkl',
             pipeline=test_pipeline, 

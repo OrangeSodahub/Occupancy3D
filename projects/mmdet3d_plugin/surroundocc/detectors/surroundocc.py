@@ -34,6 +34,7 @@ class SurroundOcc(MVXTwoStageDetector):
                  test_cfg=None,
                  pretrained=None,
                  use_semantic=True,
+                 len_queue=4,
                  is_vis=False,
                  version='v1',
                  ):
@@ -51,8 +52,11 @@ class SurroundOcc(MVXTwoStageDetector):
 
         self.use_semantic = use_semantic
         self.is_vis = is_vis
-                  
 
+        self.len_queue = len_queue
+        # only save `len_queue` previous occ preds
+        self.prev_occ_list = []
+        self.curr_scene_token = None
 
     def extract_img_feat(self, img, img_metas, len_queue=None):
         """Extract features of images."""
@@ -150,17 +154,27 @@ class SurroundOcc(MVXTwoStageDetector):
         return losses
 
     def forward_test(self, img_metas, img=None, voxel_semantics=None, **kwargs):
-        
+        # new scene
+        if img_metas[-1]['scene_token'] != self.curr_scene_token:
+            self.prev_occ_list = []
+            self.curr_scene_token = img_metas[-1]['scene_token']
+
+        # get the occ pred of current frame
         output = self.simple_test(
-            img_metas, img, **kwargs)
+            img_metas[-1], img, **kwargs)
         
         pred_occ = output['occ_preds']
-
         # `pred_occ` got multi-scale pred results
         # Here we only use the last one with shape of (200, 200, 16)
         # for evalution with ground truth
         if type(pred_occ) == list:
             pred_occ = pred_occ[-1]
+
+        # merge the occ pred of multi frames
+        pred_occ = self.merge_multi_frame_preds(pred_occ, img_metas, self.prev_occ_list)
+        self.prev_occ_list.append(pred_occ)
+        while len(self.prev_occ_list) > self.len_queue:
+            self.prev_occ_list.pop()
         
         if self.is_vis:
             self.generate_output(pred_occ, img_metas)
@@ -190,6 +204,21 @@ class SurroundOcc(MVXTwoStageDetector):
             img_feats, img_metas, rescale=rescale)
 
         return output
+
+    def merge_multi_frame_preds(target_occ, img_metas_list, prev_occ_list):
+        """Only used in test pipeline
+        :param target_occ: shape (bs, num_classes, W, H, Z)
+        """
+        assert len(img_metas) == len(prev_occ_list)
+        agg_occ = [target_occ.permute(0, 2, 3, 4, 1)]
+        for img_metas, prev_occ in zip(img_metas_list[:-1], prev_occ_list):
+            # TODO
+            # transformed_prev_occ = ...
+            # agg_occ.append(transformed_prev_occ)
+            pass
+        agg_occ = torch.stack(agg_occ)
+        agg_occ = agg_occ.mean(-1)
+        return agg_occ
 
     # TODO: modify this
     def generate_output(self, pred_occ, img_metas):
