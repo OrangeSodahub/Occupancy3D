@@ -4,15 +4,15 @@
 #  Modified by Zhiqi Li
 # ---------------------------------------------
 
+import os
 import torch
-import mmdet3d
 import numpy as np
-import time, yaml, os
 
-from mmcv.runner import force_fp32, auto_fp16
+from mmcv.runner import auto_fp16
 from mmdet.models import DETECTORS
 from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
 from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
+from torchvision.transforms.functional import rotate
 
 
 @DETECTORS.register_module()
@@ -56,6 +56,7 @@ class SurroundOcc(MVXTwoStageDetector):
         self.len_queue = len_queue
         # only save `len_queue` previous occ preds
         self.prev_occ_list = []
+        # TODO: for now, only support one gpu with batch size = 1
         self.curr_scene_token = None
 
     def extract_img_feat(self, img, img_metas, len_queue=None):
@@ -155,13 +156,14 @@ class SurroundOcc(MVXTwoStageDetector):
 
     def forward_test(self, img_metas, img=None, voxel_semantics=None, **kwargs):
         # new scene
-        if img_metas[-1]['scene_token'] != self.curr_scene_token:
+        # TODO: for now, only support one gpu with batch size = 1
+        if self.curr_scene_token is None or img_metas[0][-1]['scene_token'] != self.curr_scene_token:
             self.prev_occ_list = []
-            self.curr_scene_token = img_metas[-1]['scene_token']
+            self.curr_scene_token = img_metas[0][-1]['scene_token']
 
         # get the occ pred of current frame
         output = self.simple_test(
-            img_metas[-1], img, **kwargs)
+            img_metas[:][-1], img, **kwargs)
         
         pred_occ = output['occ_preds']
         # `pred_occ` got multi-scale pred results
@@ -206,18 +208,25 @@ class SurroundOcc(MVXTwoStageDetector):
         return output
 
     def merge_multi_frame_preds(target_occ, img_metas_list, prev_occ_list):
-        """Only used in test pipeline
+        """Only used in offline test pipeline
         :param target_occ: shape (bs, num_classes, W, H, Z)
         """
-        assert len(img_metas) == len(prev_occ_list)
-        agg_occ = [target_occ.permute(0, 2, 3, 4, 1)]
+        # TODO for now, only support one gpu with batch size = 1
+        assert len(img_metas_list[0]) == len(prev_occ_list)
+        bs, num_classes, W, H, Z = target_occ.shape
+        assert bs == 1
+        agg_occ = [target_occ.permute(0, 3, 2, 4, 1)] # (1, bs, H, W, Z, num_classes)
         for img_metas, prev_occ in zip(img_metas_list[:-1], prev_occ_list):
-            # TODO
-            # transformed_prev_occ = ...
-            # agg_occ.append(transformed_prev_occ)
-            pass
-        agg_occ = torch.stack(agg_occ)
-        agg_occ = agg_occ.mean(-1)
+            for i in range(bs):
+                # rotate the prev_occ
+                rotation_angle = img_metas[i]['can_bux'][-1]
+                prev_occ[i, :] = prev_occ[i, :].permute(2, 1, 3, 0).reshape(H, W, -1) # (H, W, Z*num_classes)
+                prev_occ[i, :] = rotate(prev_occ, rotation_angle, center=[H // 2, W // 2])
+                prev_occ[i, :] = prev_occ[i, :].reshape(H, W, Z, num_classes)
+            agg_occ.append(prev_occ)
+        agg_occ = torch.stack(agg_occ) # (len_queue, bs, H, W, Z, num_classes)
+        agg_occ = agg_occ.mean(0) # (bs, H, W, Z, num_classes)
+        agg_occ = agg_occ.permute(0, 4, 2, 1, 3) # (bs, num_classes, W, H, Z)
         return agg_occ
 
     # TODO: modify this

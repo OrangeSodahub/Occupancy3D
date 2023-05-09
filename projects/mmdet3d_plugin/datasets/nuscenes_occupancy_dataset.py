@@ -1,17 +1,16 @@
 
-import torch
-import random
-import pdb, os
+import os
+import copy
+import tempfile
 import numpy as np
 from tqdm import tqdm
 from os import path as osp
 
-import mmcv
 from mmdet.datasets import DATASETS
 from mmdet3d.datasets import NuScenesDataset
 from mmcv.parallel import DataContainer as DC
-from nuscenes.utils.geometry_utils import transform_matrix, Quaternion
-from projects.mmdet3d_plugin.models.utils.visual import save_tensor
+from nuscenes.utils.geometry_utils import transform_matrix
+from nuscenes.eval.common.utils import Quaternion, quaternion_yaw
 from projects.mmdet3d_plugin.datasets.evaluation_metrics import Metric_mIoU, Metric_FScore
 
 
@@ -101,40 +100,6 @@ class CustomNuScenesOccDataset(NuScenesDataset):
             example['img_metas'].pop()
         
         return example
-
-    def union2one(self, queue):
-        """Only used in test pipeline.
-
-        """
-        metas_map = {}
-        prev_scene_token = None
-        prev_pos = None
-        prev_angle = None
-        for i, each in enumerate(queue):
-            metas_map[i] = each['img_metas'].data
-            if metas_map[i]['scene_token'] != prev_scene_token:
-                metas_map[i]['prev_feat_exists'] = False
-                prev_scene_token = metas_map[i]['scene_token']
-                prev_pos = copy.deepcopy(metas_map[i]['can_bus'][:3])
-                prev_angle = copy.deepcopy(metas_map[i]['can_bus'][-1])
-                metas_map[i]['can_bus'][:3] = 0
-                metas_map[i]['can_bus'][-1] = 0
-            else:
-                metas_map[i]['prev_feat_exists'] = True
-                tmp_pos = copy.deepcopy(metas_map[i]['can_bus'][:3])
-                tmp_angle = copy.deepcopy(metas_map[i]['can_bus'][-1])
-                # Calculate the diff of pose/angle between current and previous frame
-                metas_map[i]['can_bus'][:3] -= prev_pos
-                metas_map[i]['can_bus'][-1] -= prev_angle
-                prev_pos = copy.deepcopy(tmp_pos)
-                prev_angle = copy.deepcopy(tmp_angle)
-        # data fed into surroundocc.forward(), `img_metas`==`metas_map`
-        # kwargs: dict_keys(['img_metas', 'img', 'volume_semantics', 'mask_camera])
-        # NOTE: only contains the img of the current frame while `queue_length` img_metas
-        queue[-1]['img'] = imgs_list[-1]
-        queue[-1]['img_metas'] = DC(metas_map, cpu_only=True)
-        queue = queue[-1]
-        return queue
 
     def get_data_info(self, index):
         """Get data info according to the given index.
