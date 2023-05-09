@@ -163,7 +163,7 @@ class SurroundOcc(MVXTwoStageDetector):
 
         # get the occ pred of current frame
         output = self.simple_test(
-            img_metas[:][-1], img, **kwargs)
+            [img_metas[0][-1]], img, **kwargs)
         
         pred_occ = output['occ_preds']
         # `pred_occ` got multi-scale pred results
@@ -176,7 +176,7 @@ class SurroundOcc(MVXTwoStageDetector):
         pred_occ = self.merge_multi_frame_preds(pred_occ, img_metas, self.prev_occ_list)
         self.prev_occ_list.append(pred_occ)
         while len(self.prev_occ_list) > self.len_queue:
-            self.prev_occ_list.pop()
+            self.prev_occ_list.pop(0)
         
         if self.is_vis:
             self.generate_output(pred_occ, img_metas)
@@ -201,18 +201,17 @@ class SurroundOcc(MVXTwoStageDetector):
         """Test function without augmentaiton."""
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
 
-        bbox_list = [dict() for i in range(len(img_metas))]
         output = self.simple_test_pts(
             img_feats, img_metas, rescale=rescale)
 
         return output
 
-    def merge_multi_frame_preds(target_occ, img_metas_list, prev_occ_list):
+    def merge_multi_frame_preds(self, target_occ, img_metas_list, prev_occ_list):
         """Only used in offline test pipeline
         :param target_occ: shape (bs, num_classes, W, H, Z)
         """
         # TODO for now, only support one gpu with batch size = 1
-        assert len(img_metas_list[0]) == len(prev_occ_list)
+        assert len(img_metas_list[0])-1 == len(prev_occ_list)
         bs, num_classes, W, H, Z = target_occ.shape
         assert bs == 1
         agg_occ = [target_occ.permute(0, 3, 2, 4, 1)] # (1, bs, H, W, Z, num_classes)

@@ -54,7 +54,7 @@ class CustomNuScenesOccDataset(NuScenesDataset):
 
         """
         metas_map = []
-        index_list = list(range(index - self.queue_length, index))
+        index_list = list(range(index - self.len_queue, index))
         # NOTE: do not shuffle the index list
         index_list.append(index)
         for i in index_list:
@@ -71,34 +71,37 @@ class CustomNuScenesOccDataset(NuScenesDataset):
         example['img_metas'] = metas_map
 
         # process img_metas
-        curr_scene_token = example['img_metas'][-1]['scene_token']
+        self.curr_scene_token = example['img_metas'][-1].data['scene_token']
+        metas_map = []
         not_curr_scene_num = 0
         prev_pos = None
         prev_angle = None
-        for img_meta in example['img_metas']:
-            if img_meta['scene_token'] != curr_scene_token:
+        for i, img_meta in enumerate(example['img_metas']):
+            metas_map.append(img_meta.data)
+            if metas_map[i]['scene_token'] != self.curr_scene_token:
                 not_curr_scene_num += 1
                 continue
             if prev_pos is None:
                 # the first frame of the frame queue
-                prev_pos = copy.deepcopy(img_meta['can_bus'][:3])
-                prev_angle = copy.deepcopy(img_meta['can_bus'][-1])
-                img_meta['can_bus'][:3] = 0
-                img_meta['can_bus'][-1] = 0
+                prev_pos = copy.deepcopy(metas_map[i]['can_bus'][:3])
+                prev_angle = copy.deepcopy(metas_map[i]['can_bus'][-1])
+                metas_map[i]['can_bus'][:3] = 0
+                metas_map[i]['can_bus'][-1] = 0
             else:
                 # the subsequent frame after the first frame of current queue
-                tmp_pos = copy.deepcopy(img_meta['can_bus'][:3])
-                tmp_angle = copy.deepcopy(img_meta['can_bus'][-1])
+                tmp_pos = copy.deepcopy(metas_map[i]['can_bus'][:3])
+                tmp_angle = copy.deepcopy(metas_map[i]['can_bus'][-1])
                 # calculate the diff of pose/angle between current and previous frame
-                img_meta['can_bus'][:3] -= prev_pos
-                img_meta['can_bus'][-1] -= prev_angle
+                metas_map[i]['can_bus'][:3] -= prev_pos
+                metas_map[i]['can_bus'][-1] -= prev_angle
                 prev_pos = copy.deepcopy(tmp_pos)
                 prev_angle = copy.deepcopy(tmp_angle)
 
         # remove the frame that not in current scene
         for _ in range(not_curr_scene_num):
-            example['img_metas'].pop()
+            metas_map.pop()
         
+        example['img_metas'] = DC(metas_map, cpu_only=True)
         return example
 
     def get_data_info(self, index):
