@@ -213,15 +213,16 @@ class SurroundOcc(MVXTwoStageDetector):
         # TODO for now, only support one gpu with batch size = 1
         assert len(img_metas_list[0])-1 == len(prev_occ_list)
         bs, num_classes, W, H, Z = target_occ.shape
-        assert bs == 1
+        assert bs == 1 # only support bs=1
         agg_occ = [target_occ.permute(0, 3, 2, 4, 1)] # (1, bs, H, W, Z, num_classes)
-        for img_metas, prev_occ in zip(img_metas_list[:-1], prev_occ_list):
-            for i in range(bs):
-                # rotate the prev_occ
-                rotation_angle = img_metas[i]['can_bux'][-1]
-                prev_occ[i, :] = prev_occ[i, :].permute(2, 1, 3, 0).reshape(H, W, -1) # (H, W, Z*num_classes)
-                prev_occ[i, :] = rotate(prev_occ, rotation_angle, center=[H // 2, W // 2])
-                prev_occ[i, :] = prev_occ[i, :].reshape(H, W, Z, num_classes)
+        for i, prev_occ in enumerate(prev_occ_list):
+            # rotate the prev_occ
+            rotation_angle = np.array(img_metas['can_bus'][-1] for img_metas in img_metas_list[:i-self.len_queue:-1]).sum()
+            # translate the prev_occ
+            # TODO
+            prev_occ = prev_occ.permute(0, 3, 2, 4, 1).reshape(bs, H, W, -1) # (bs, H, W, Z*num_classes)
+            prev_occ[0] = rotate(prev_occ[0], rotation_angle, center=[H // 2, W // 2]) # NOTE: only support bs=1
+            prev_occ = prev_occ.reshape(bs, H, W, Z, num_classes)
             agg_occ.append(prev_occ)
         agg_occ = torch.stack(agg_occ) # (len_queue, bs, H, W, Z, num_classes)
         agg_occ = agg_occ.mean(0) # (bs, H, W, Z, num_classes)

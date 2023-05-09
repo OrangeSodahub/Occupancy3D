@@ -21,7 +21,8 @@ class CustomNuScenesOccDataset(NuScenesDataset):
     This datset only add camera intrinsics and extrinsics to the results.
     """
 
-    def __init__(self, occ_size, pc_range, use_semantic=False, classes=None, overlap_test=False, eval_fscore=False, is_train=False, len_queue=4, *args, **kwargs):
+    def __init__(self, occ_size, pc_range, use_semantic=False, classes=None, overlap_test=False, eval_fscore=False, is_train=False,
+                len_queue=4, use_sequential=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.overlap_test = overlap_test
         self.occ_size = occ_size
@@ -31,6 +32,7 @@ class CustomNuScenesOccDataset(NuScenesDataset):
         self.eval_fscore = eval_fscore
         self.is_train = is_train
         self.len_queue = len_queue
+        self.use_sequential = use_sequential
         self._set_group_flag()
         
     def prepare_train_data(self, index):
@@ -99,7 +101,7 @@ class CustomNuScenesOccDataset(NuScenesDataset):
 
         # remove the frame that not in current scene
         for _ in range(not_curr_scene_num):
-            metas_map.pop()
+            metas_map.pop(0)
         
         example['img_metas'] = DC(metas_map, cpu_only=True)
         return example
@@ -211,7 +213,10 @@ class CustomNuScenesOccDataset(NuScenesDataset):
             dict: Data dictionary of the corresponding index.
         """
         if self.test_mode:
-            data = self.prepare_test_data_sequential(idx)
+            if self.use_sequential:
+                data = self.prepare_test_data_sequential(idx)
+            else:
+                data = self.prepare_test_data(idx)
             return data
 
         while True:
