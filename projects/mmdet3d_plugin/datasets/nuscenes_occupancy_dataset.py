@@ -21,7 +21,7 @@ class CustomNuScenesOccDataset(NuScenesDataset):
     This datset only add camera intrinsics and extrinsics to the results.
     """
 
-    def __init__(self, occ_size, pc_range, use_semantic=False, classes=None, overlap_test=False, eval_fscore=False, is_train=False,
+    def __init__(self, occ_size, pc_range, use_semantic=False, classes=None, overlap_test=False, eval_fscore=False,
                 len_queue=4, use_sequential=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.overlap_test = overlap_test
@@ -30,7 +30,6 @@ class CustomNuScenesOccDataset(NuScenesDataset):
         self.use_semantic = use_semantic
         self.class_names = classes
         self.eval_fscore = eval_fscore
-        self.is_train = is_train
         self.len_queue = len_queue
         self.use_sequential = use_sequential
         self._set_group_flag()
@@ -179,7 +178,7 @@ class CustomNuScenesOccDataset(NuScenesDataset):
             input_dict['ann_info'] = annos
 
         # sequential process in test pipeline
-        if not self.is_train:
+        if self.test_mode:
             input_dict.update(
                 dict(
                     sample_idx=info['token'],

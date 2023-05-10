@@ -1,5 +1,7 @@
+import torch
 import numpy as np
 from mayavi import mlab
+from torchvision.transforms.functional import rotate
 # mlab.options.offscreen = True
 print("Set mlab.options.offscreen={}".format(mlab.options.offscreen))
 
@@ -71,6 +73,12 @@ def draw(
 ):
     h, w, z = voxels.shape
 
+    # Rotate the voxels
+    voxels = rotate(torch.Tensor(voxels), 10, center=(h//2, w//2), fill=(4,)).numpy()
+    mask_camera = rotate(torch.Tensor(mask_camera), 10, center=(h//2, w//2), fill=(1,)).numpy()
+    print(voxels)
+    print(mask_camera)
+
     # Compute the voxels coordinates
     grid_index, semantics_index, grid_coords = get_grid_coords([h, w, z], voxel_size, ratio)
 
@@ -79,6 +87,7 @@ def draw(
         masks = np.vstack([grid_index.T, mask_camera.reshape(-1)]).T
         voxels = voxels[voxels[:, 3] < 17]
         grid_index = voxels[:, :3] // ratio
+        print(grid_index)
         grid_index_mask = masks[:, :3] // ratio
         semantics_index = np.zeros([h // ratio, w // ratio, z // ratio])
         masks_index = semantics_index.copy()

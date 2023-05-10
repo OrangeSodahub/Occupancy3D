@@ -10,9 +10,9 @@ import numpy as np
 
 from mmcv.runner import auto_fp16
 from mmdet.models import DETECTORS
+from torchvision.transforms.functional import affine
 from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
 from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
-from torchvision.transforms.functional import rotate
 
 
 @DETECTORS.register_module()
@@ -35,6 +35,7 @@ class SurroundOcc(MVXTwoStageDetector):
                  pretrained=None,
                  use_semantic=True,
                  len_queue=4,
+                 voxel_size=[0.4, 0.4, 0.4],
                  is_vis=False,
                  version='v1',
                  ):
@@ -54,6 +55,7 @@ class SurroundOcc(MVXTwoStageDetector):
         self.is_vis = is_vis
 
         self.len_queue = len_queue
+        self.voxel_size = voxel_size
         # only save `len_queue` previous occ preds
         self.prev_occ_list = []
         # TODO: for now, only support one gpu with batch size = 1
@@ -216,12 +218,14 @@ class SurroundOcc(MVXTwoStageDetector):
         assert bs == 1 # only support bs=1
         agg_occ = [target_occ.permute(0, 3, 2, 4, 1)] # (1, bs, H, W, Z, num_classes)
         for i, prev_occ in enumerate(prev_occ_list):
-            # rotate the prev_occ
+            # affine (rotate + translate)
+            # TODO: translate z-axis
             rotation_angle = np.array(img_metas['can_bus'][-1] for img_metas in img_metas_list[:i-self.len_queue:-1]).sum()
-            # translate the prev_occ
-            # TODO
+            translate_dist = np.array(img_metas['can_bus'][:3] for img_metas in img_metas_list[:i-self.len_queue:-1]).sum(0)
+            translate_dist = (translate_dist // self.voxel_size).round()
             prev_occ = prev_occ.permute(0, 3, 2, 4, 1).reshape(bs, H, W, -1) # (bs, H, W, Z*num_classes)
-            prev_occ[0] = rotate(prev_occ[0], rotation_angle, center=[H // 2, W // 2]) # NOTE: only support bs=1
+            prev_occ[0] = affine(prev_occ[0].permute(2, 0, 1), rotate=rotation_angle, center=[W // 2, H // 2],
+                                translate=(translate_dist[1], translate_dist[0]), scale=1., shear=0., fill=(0.,)).permute(1, 2, 0) # NOTE: only support bs=1
             prev_occ = prev_occ.reshape(bs, H, W, Z, num_classes)
             agg_occ.append(prev_occ)
         agg_occ = torch.stack(agg_occ) # (len_queue, bs, H, W, Z, num_classes)
