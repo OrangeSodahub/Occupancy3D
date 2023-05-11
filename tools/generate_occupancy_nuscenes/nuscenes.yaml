@@ -32,7 +32,7 @@ labels:
   30: 'static.vegetation'
   31: 'vehicle.ego'
   32: 'empty'
-labels_17:  
+labels_16:
   0: 'noise'
   1: 'barrier'
   2: 'bicycle'

@@ -8,10 +8,13 @@ plugin_dir = 'projects/mmdet3d_plugin/'
 
 # If point cloud range is changed, the models should also change their point
 # cloud range accordingly
+len_queue=4
 point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
 occ_size = [200, 200, 16]
 use_semantic = True
 use_mask = False
+use_points = True # knowledge distillation
+use_sequential = False # test pipeline
 
 img_norm_cfg = dict(
     mean=[103.530, 116.280, 123.675], std=[1.0, 1.0, 1.0], to_rgb=False)
@@ -19,9 +22,13 @@ img_norm_cfg = dict(
 class_names =  ['other', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehicle', 'motorcycle',
                 'pedestrian', 'traffic_cone', 'trailer', 'truck', 'driveable_surface',
                 'other_flat', 'sidewalk', 'terrain', 'manmade', 'vegetation', 'free']
+class_weight = [0.05597741, 0.05857186, 0.07012177, 0.05821387, 0.05237201,
+                0.06030229, 0.0685634 , 0.05849956, 0.06577655, 0.05758299,
+                0.05514106, 0.04643295, 0.05634901, 0.04929424, 0.04858398,
+                0.04741097, 0.04701869, 0.03516321]
 
 input_modality = dict(
-    use_lidar=True,
+    use_lidar=use_points,
     use_camera=True,
     use_radar=False,
     use_map=False,
@@ -37,9 +44,9 @@ _num_layers_ = [1, 3, 6]
 
 model = dict(
     type='SurroundOcc',
-    with_points=True,
     use_grid_mask=True,
     use_semantic=use_semantic,
+    use_points=use_points,
     img_backbone=dict(
        type='ResNet',
        depth=101,
@@ -116,6 +123,8 @@ model = dict(
         img_channels=[512, 512, 512],
         use_semantic=use_semantic,
         use_mask=use_mask,
+        use_points=use_points,
+        len_queue=len_queue,
         transformer_template=dict(
             type='PerceptionTransformer',
             embed_dims=_dim_,
@@ -144,6 +153,13 @@ model = dict(
                     conv_num=2,
                     operation_order=('cross_attn', 'norm',
                                      'ffn', 'norm', 'conv')))),
+    ce_loss_cfg=dict(
+        type='CrossEntropyLoss',
+        use_sigmoid=False,
+        class_weight=class_weight,
+        loss_weight=1.0),
+    geo_loss=True,
+    sem_loss=True,
 ),
 )
 
@@ -169,7 +185,7 @@ test_pipeline = [
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-    dict(type='CustomCollect3D', keys=['img', 'voxel_semantics', 'mask_camera'])
+    dict(type='CustomCollect3D', keys=['img'])
 ]
 
 find_unused_parameters = True
@@ -196,7 +212,9 @@ data = dict(
             occ_size=occ_size,
             pc_range=point_cloud_range,
             use_semantic=use_semantic,
+            use_sequential=use_sequential,
             classes=class_names,
+            len_queue=len_queue,
             modality=input_modality,
             eval_fscore=True),
     test=dict(type=dataset_type,
@@ -206,7 +224,9 @@ data = dict(
             occ_size=occ_size,
             pc_range=point_cloud_range,
             use_semantic=use_semantic,
+            use_sequential=use_sequential,
             classes=class_names,
+            len_queue=len_queue,
             modality=input_modality,
             eval_fscore=True),
     shuffler_sampler=dict(type='DistributedGroupSampler'),

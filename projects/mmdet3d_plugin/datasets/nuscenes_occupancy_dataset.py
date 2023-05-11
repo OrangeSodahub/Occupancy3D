@@ -1,17 +1,16 @@
 
-import torch
-import random
-import pdb, os
+import os
+import copy
+import tempfile
 import numpy as np
 from tqdm import tqdm
 from os import path as osp
 
-import mmcv
 from mmdet.datasets import DATASETS
 from mmdet3d.datasets import NuScenesDataset
 from mmcv.parallel import DataContainer as DC
-from nuscenes.utils.geometry_utils import transform_matrix, Quaternion
-from projects.mmdet3d_plugin.models.utils.visual import save_tensor
+from nuscenes.utils.geometry_utils import transform_matrix
+from nuscenes.eval.common.utils import Quaternion, quaternion_yaw
 from projects.mmdet3d_plugin.datasets.evaluation_metrics import Metric_mIoU, Metric_FScore
 
 
@@ -22,7 +21,8 @@ class CustomNuScenesOccDataset(NuScenesDataset):
     This datset only add camera intrinsics and extrinsics to the results.
     """
 
-    def __init__(self, occ_size, pc_range, use_semantic=False, classes=None, overlap_test=False, eval_fscore=False, *args, **kwargs):
+    def __init__(self, occ_size, pc_range, use_semantic=False, classes=None, overlap_test=False, eval_fscore=False,
+                len_queue=4, use_sequential=False, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.overlap_test = overlap_test
         self.occ_size = occ_size
@@ -30,6 +30,8 @@ class CustomNuScenesOccDataset(NuScenesDataset):
         self.use_semantic = use_semantic
         self.class_names = classes
         self.eval_fscore = eval_fscore
+        self.len_queue = len_queue
+        self.use_sequential = use_sequential
         self._set_group_flag()
         
     def prepare_train_data(self, index):
@@ -46,6 +48,61 @@ class CustomNuScenesOccDataset(NuScenesDataset):
             return None
         self.pre_pipeline(input_dict)
         example = self.pipeline(input_dict)
+        return example
+
+    def prepare_test_data_sequential(self, index):
+        """Testing data preparation.
+
+        """
+        metas_map = []
+        index_list = list(range(index - self.len_queue, index))
+        # NOTE: do not shuffle the index list
+        index_list.append(index)
+        for i in index_list:
+            if i < 0:
+                continue
+            input_dict = self.get_data_info(i)
+            if input_dict is None:
+                return None
+            self.pre_pipeline(input_dict)
+            example = self.pipeline(input_dict)
+            metas_map.append(example['img_metas'])
+
+        # add previous `len_queue` img_metas infos to the current frame
+        example['img_metas'] = metas_map
+
+        # process img_metas
+        self.curr_scene_token = example['img_metas'][-1].data['scene_token']
+        metas_map = []
+        not_curr_scene_num = 0
+        prev_pos = None
+        prev_angle = None
+        for i, img_meta in enumerate(example['img_metas']):
+            metas_map.append(img_meta.data)
+            if metas_map[i]['scene_token'] != self.curr_scene_token:
+                not_curr_scene_num += 1
+                continue
+            if prev_pos is None:
+                # the first frame of the frame queue
+                prev_pos = copy.deepcopy(metas_map[i]['can_bus'][:3])
+                prev_angle = copy.deepcopy(metas_map[i]['can_bus'][-1])
+                metas_map[i]['can_bus'][:3] = 0
+                metas_map[i]['can_bus'][-1] = 0
+            else:
+                # the subsequent frame after the first frame of current queue
+                tmp_pos = copy.deepcopy(metas_map[i]['can_bus'][:3])
+                tmp_angle = copy.deepcopy(metas_map[i]['can_bus'][-1])
+                # calculate the diff of pose/angle between current and previous frame
+                metas_map[i]['can_bus'][:3] -= prev_pos
+                metas_map[i]['can_bus'][-1] -= prev_angle
+                prev_pos = copy.deepcopy(tmp_pos)
+                prev_angle = copy.deepcopy(tmp_angle)
+
+        # remove the frame that not in current scene
+        for _ in range(not_curr_scene_num):
+            metas_map.pop(0)
+        
+        example['img_metas'] = DC(metas_map, cpu_only=True)
         return example
 
     def get_data_info(self, index):
@@ -129,6 +186,33 @@ class CustomNuScenesOccDataset(NuScenesDataset):
             annos = self.get_ann_info(index)
             input_dict['ann_info'] = annos
 
+        # sequential process in test pipeline
+        if self.test_mode:
+            input_dict.update(
+                dict(
+                    sample_idx=info['token'],
+                    frame_idx=info['frame_idx'],
+                    prev_idx=info['prev'],
+                    next_idx=info['next'],
+                    scene_token=info['scene_token'],
+                    can_bus=info['can_bus'],
+                    timestamp=info['timestamp'] / 1e6,
+                    ego2global_translation=info['ego2global_translation'],
+                    ego2global_rotation=info['ego2global_rotation'],
+                )
+            )
+            # transform ego vehicle to global
+            rotation = Quaternion(input_dict['ego2global_rotation'])
+            translation = input_dict['ego2global_translation']
+            can_bus = input_dict['can_bus']
+            can_bus[:3] = translation
+            can_bus[3:7] = rotation
+            patch_angle = quaternion_yaw(rotation) / np.pi * 180
+            if patch_angle < 0:
+                patch_angle += 360
+            can_bus[-2] = patch_angle / 180 * np.pi
+            can_bus[-1] = patch_angle
+
         return input_dict
 
     def __getitem__(self, idx):
@@ -137,11 +221,13 @@ class CustomNuScenesOccDataset(NuScenesDataset):
             dict: Data dictionary of the corresponding index.
         """
         if self.test_mode:
-            info = self.data_infos[idx]
-            
-            return self.prepare_test_data(idx)
-        while True:
+            if self.use_sequential:
+                data = self.prepare_test_data_sequential(idx)
+            else:
+                data = self.prepare_test_data(idx)
+            return data
 
+        while True:
             data = self.prepare_train_data(idx)
             if data is None:
                 idx = self._rand_another(idx)

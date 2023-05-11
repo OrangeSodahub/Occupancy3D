@@ -57,6 +57,7 @@ class PerceptionTransformer(BaseModule):
         self.two_stage_num_proposals = two_stage_num_proposals
         self.init_layers()
         self.rotate_center = rotate_center
+        self.reference_points = nn.Linear(self.embed_dims, 3)
 
     def init_layers(self):
         """Initialize layers of the Detr3DTransformer."""
@@ -64,7 +65,6 @@ class PerceptionTransformer(BaseModule):
             self.num_feature_levels, self.embed_dims))
         self.cams_embeds = nn.Parameter(
             torch.Tensor(self.num_cams, self.embed_dims))
-        self.reference_points = nn.Linear(self.embed_dims, 3)
 
     def init_weights(self):
         """Initialize the transformer weights."""

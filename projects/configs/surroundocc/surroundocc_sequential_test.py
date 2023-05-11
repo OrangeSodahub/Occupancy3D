@@ -8,20 +8,27 @@ plugin_dir = 'projects/mmdet3d_plugin/'
 
 # If point cloud range is changed, the models should also change their point
 # cloud range accordingly
-point_cloud_range = [-50, -50, -5.0, 50, 50, 3.0]
+len_queue=4
+point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
 occ_size = [200, 200, 16]
 use_semantic = True
-
+use_mask = True
+use_points = False # knowledge distillation
+use_sequential = True # test pipeline
 
 img_norm_cfg = dict(
     mean=[103.530, 116.280, 123.675], std=[1.0, 1.0, 1.0], to_rgb=False)
 
-class_names =  ['barrier','bicycle', 'bus', 'car', 'construction_vehicle', 'motorcycle',
+class_names =  ['other', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehicle', 'motorcycle',
                 'pedestrian', 'traffic_cone', 'trailer', 'truck', 'driveable_surface',
-                'other_flat', 'sidewalk', 'terrain', 'manmade','vegetation']
+                'other_flat', 'sidewalk', 'terrain', 'manmade', 'vegetation', 'free']
+class_weight = [0.05597741, 0.05857186, 0.07012177, 0.05821387, 0.05237201,
+                0.06030229, 0.0685634 , 0.05849956, 0.06577655, 0.05758299,
+                0.05514106, 0.04643295, 0.05634901, 0.04929424, 0.04858398,
+                0.04741097, 0.04701869, 0.03516321]
 
 input_modality = dict(
-    use_lidar=False,
+    use_lidar=use_points,
     use_camera=True,
     use_radar=False,
     use_map=False,
@@ -39,7 +46,7 @@ model = dict(
     type='SurroundOcc',
     use_grid_mask=True,
     use_semantic=use_semantic,
-    is_vis=True,
+    use_points=use_points,
     img_backbone=dict(
        type='ResNet',
        depth=101,
@@ -65,15 +72,19 @@ model = dict(
         volume_h=volume_h_,
         volume_w=volume_w_,
         volume_z=volume_z_,
+        occ_size=occ_size,
         num_query=900,
-        num_classes=17,
+        num_classes=18,
         conv_input=[_dim_[2], 256, _dim_[1], 128, _dim_[0], 64, 64],
         conv_output=[256, _dim_[1], 128, _dim_[0], 64, 64, 32],
         out_indices=[0, 2, 4, 6],
-        upsample_strides=[1,2,1,2,1,2,1],
+        upsample_strides=[1, 2, 1, 2, 1, 2, 1],
         embed_dims=_dim_,
         img_channels=[512, 512, 512],
         use_semantic=use_semantic,
+        use_mask=use_mask,
+        use_points=use_points,
+        len_queue=len_queue,
         transformer_template=dict(
             type='PerceptionTransformer',
             embed_dims=_dim_,
@@ -102,29 +113,38 @@ model = dict(
                     conv_num=2,
                     operation_order=('cross_attn', 'norm',
                                      'ffn', 'norm', 'conv')))),
-),
+    ce_loss_cfg=dict(
+        type='CrossEntropyLoss',
+        use_sigmoid=False,
+        class_weight=class_weight,
+        loss_weight=1.0),
+    geo_loss=True,
+    sem_loss=True,
+    ),
 )
 
 dataset_type = 'CustomNuScenesOccDataset'
-data_root = 'data/nuscenes/'
+data_root = 'data/occ3d-nus/'
 file_client_args = dict(backend='disk')
-
+occ_gt_data_root='data/occ3d-nus'
 
 train_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
     dict(type='PhotoMetricDistortionMultiViewImage'),
+    dict(type='LoadOccupancy', data_root=occ_gt_data_root, use_semantic=use_semantic),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-    dict(type='CustomCollect3D', keys=['img'])
+    dict(type='CustomCollect3D', keys=[ 'img', 'voxel_semantics', 'mask_camera'])
 ]
 
 test_pipeline = [
     dict(type='LoadMultiViewImageFromFiles', to_float32=True),
+    dict(type='LoadOccupancy', data_root=occ_gt_data_root, use_semantic=use_semantic),
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-    dict(type='CustomCollect3D', keys=['img'])
+    dict(type='CustomCollect3D', keys=[ 'img'])
 ]
 
 find_unused_parameters = True
@@ -132,36 +152,42 @@ data = dict(
     samples_per_gpu=1,
     workers_per_gpu=4,
     train=dict(
-        type=dataset_type,
-        data_root=data_root,
-        ann_file='data/nuscenes_infos_train.pkl',
-        pipeline=train_pipeline,
-        modality=input_modality,
-        test_mode=False,
-        use_valid_flag=True,
-        occ_size=occ_size,
-        pc_range=point_cloud_range,
-        use_semantic=use_semantic,
-        classes=class_names,
-        box_type_3d='LiDAR'),
+            type=dataset_type,
+            data_root=data_root,
+            ann_file='data/occ3d-nus/occ_infos_temporal_train.pkl',
+            pipeline=train_pipeline,
+            modality=input_modality,
+            test_mode=False,
+            use_valid_flag=True,
+            occ_size=occ_size,
+            pc_range=point_cloud_range,
+            use_semantic=use_semantic,
+            classes=class_names,
+            box_type_3d='LiDAR'),
     val=dict(type=dataset_type,
-             data_root=data_root,
-             ann_file='data/nuscenes_infos_val.pkl',
-             pipeline=test_pipeline,
-             occ_size=occ_size,
-             pc_range=point_cloud_range,
-             use_semantic=use_semantic,
-             classes=class_names,
-             modality=input_modality),
+            data_root=data_root,
+            ann_file='data/occ3d-nus/occ_infos_temporal_val.pkl',
+            pipeline=test_pipeline,  
+            occ_size=occ_size,
+            pc_range=point_cloud_range,
+            use_semantic=use_semantic,
+            use_sequential=use_sequential,
+            classes=class_names,
+            len_queue=len_queue,
+            modality=input_modality,
+            eval_fscore=True),
     test=dict(type=dataset_type,
-              data_root=data_root,
-              ann_file='data/inference_infos.pkl',
-              pipeline=test_pipeline,
-              occ_size=occ_size,
-              pc_range=point_cloud_range,
-              use_semantic=use_semantic,
-              classes=class_names,
-              modality=input_modality),
+            data_root=data_root,
+            ann_file='data/occ3d-nus/occ_infos_temporal_val.pkl',
+            pipeline=test_pipeline, 
+            occ_size=occ_size,
+            pc_range=point_cloud_range,
+            use_semantic=use_semantic,
+            use_sequential=use_sequential,
+            classes=class_names,
+            len_queue=len_queue,
+            modality=input_modality,
+            eval_fscore=True),
     shuffler_sampler=dict(type='DistributedGroupSampler'),
     nonshuffler_sampler=dict(type='DistributedSampler')
 )

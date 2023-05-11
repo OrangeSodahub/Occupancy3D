@@ -11,12 +11,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from mmdet.models import HEADS
+from mmdet.models.builder import build_loss
 from mmdet.models.utils import build_transformer
 from mmcv.runner import force_fp32, auto_fp16
 from mmcv.cnn.utils.weight_init import constant_init
 from mmcv.cnn import build_conv_layer, build_norm_layer, build_upsample_layer
 from projects.mmdet3d_plugin.surroundocc.loss.loss_utils import multiscale_supervision, geo_scal_loss, sem_scal_loss
-from projects.mmdet3d_plugin.surroundocc.modules.utils import nusc_class_frequencies
 
 
 @HEADS.register_module()
@@ -24,6 +24,9 @@ class OccHead(nn.Module):
     def __init__(self,
                  *args,
                  transformer_template=None,
+                 ce_loss_cfg=None,
+                 geo_loss=False,
+                 sem_loss=False,
                  num_classes=18,
                  volume_h=[100, 50, 25],
                  volume_w=[100, 50, 25],
@@ -38,6 +41,7 @@ class OccHead(nn.Module):
                  img_channels=None,
                  use_semantic=True,
                  use_mask=False,
+                 use_points=False,
                  **kwargs):
         super(OccHead, self).__init__()
         self.conv_input = conv_input
@@ -52,6 +56,7 @@ class OccHead(nn.Module):
         self.img_channels = img_channels
 
         self.use_mask = use_mask
+        self.use_points = use_points
         self.embed_dims = embed_dims
         self.lambda_xm = 0.1
         self.single_scale_fusion = single_scale_fusion
@@ -60,6 +65,11 @@ class OccHead(nn.Module):
         self.upsample_strides = upsample_strides
         self.out_indices = out_indices
         self.transformer_template = transformer_template
+
+        assert ce_loss_cfg is not None
+        self.ce_loss = build_loss(ce_loss_cfg)
+        self.geo_loss = geo_loss
+        self.sem_loss = sem_loss
 
         self._init_layers()
 
@@ -197,6 +207,7 @@ class OccHead(nn.Module):
             if hasattr(m, 'conv_offset'):
                 constant_init(m.conv_offset, 0)
 
+    @auto_fp16(apply_to=('mlvl_feats'))
     def get_volume_img_feats(self, mlvl_feats, img_metas):
         # image feature map shape: (B, N, C, H, W)
         bs, num_cam, _, _, _ = mlvl_feats[0].shape
@@ -307,9 +318,8 @@ class OccHead(nn.Module):
              preds_dicts,
              img_metas):
      
-        class_weights = torch.from_numpy(1 / np.log(nusc_class_frequencies + 0.001))
         criterion = nn.CrossEntropyLoss(
-            weight=class_weights.type_as(preds_dicts['occ_preds_img'][0]), ignore_index=255, reduction="mean"
+            ignore_index=255, reduction="mean"
         )
         
         loss_dict = {}
@@ -319,22 +329,27 @@ class OccHead(nn.Module):
 
             # `voxel_semantics` has the highest resolution
             # Here we downsample the `voxel_semantics` to generate low level resolution labels
-            gt = multiscale_supervision(voxel_semantics.clone(), ratio, pred_camera.shape, self.coords_grid)
+            gt, mask = multiscale_supervision(voxel_semantics.clone(), ratio, pred_camera.shape, self.coords_grid, mask_camera, self.use_mask)
             gt = gt.permute(0, 2, 1, 3) # align with the pred
-            
-            # TODO: add loss weights to bce loss
-            loss_occ_i_c = (criterion(pred_camera, gt.long()) + sem_scal_loss(pred_camera, gt.long()) + geo_scal_loss(pred_camera, gt.long()))
-            loss_occ_i = loss_occ_i_c
+            mask = mask.permute(0, 2, 1, 3)
 
-            # fusion loss and kl divergence
-            if (not self.single_scale_fusion) or (self.single_scale_fusion and i == len(preds_dicts['occ_preds_img'])-1):
-                pred_fusion = preds_dicts['occ_preds_fusion'][i] if not self.single_scale_fusion else preds_dicts['occ_preds_fusion'][-1]
-                loss_occ_i_f = (criterion(pred_fusion, gt.long()) + sem_scal_loss(pred_fusion, gt.long()) + geo_scal_loss(pred_fusion, gt.long()))
-                xm_loss = F.kl_div(
-                    F.log_softmax(pred_camera, dim=1),
-                    F.softmax(pred_fusion.detach(), dim=1)
-                )
-                loss_occ_i += loss_occ_i_f + xm_loss * self.lambda_xm
+            if not self.use_mask:
+                loss_occ_i_c = (criterion(pred_camera, gt.long()) + sem_scal_loss(pred_camera, gt.long()) + geo_scal_loss(pred_camera, gt.long()))
+                loss_occ_i = loss_occ_i_c
+
+                # fusion loss and kl divergence
+                if self.use_points:
+                    if (not self.single_scale_fusion) or (self.single_scale_fusion and i == len(preds_dicts['occ_preds_img'])-1):
+                        pred_fusion = preds_dicts['occ_preds_fusion'][i] if not self.single_scale_fusion else preds_dicts['occ_preds_fusion'][-1]
+                        loss_occ_i_f = (criterion(pred_fusion, gt.long()) + sem_scal_loss(pred_fusion, gt.long()) + geo_scal_loss(pred_fusion, gt.long()))
+                        xm_loss = F.kl_div(
+                            F.log_softmax(pred_camera, dim=1),
+                            F.softmax(pred_fusion.detach(), dim=1)
+                        )
+                        loss_occ_i += loss_occ_i_f + xm_loss * self.lambda_xm
+
+            elif self.use_mask:
+                raise NotImplementedError
             
             # focal weight
             loss_occ_i = loss_occ_i * ((0.5)**(len(preds_dicts['occ_preds_img']) - 1 -i))

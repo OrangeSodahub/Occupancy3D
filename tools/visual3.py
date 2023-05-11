@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from mayavi import mlab
-from torchvision.transforms.functional import rotate
+from torchvision.transforms.functional import affine
 # mlab.options.offscreen = True
 print("Set mlab.options.offscreen={}".format(mlab.options.offscreen))
 
@@ -63,46 +63,47 @@ def get_grid_coords(dims, resolution, ratio):
 
 
 def draw(
-    voxels,                         # semantic occupancy predictions
-    mask_camera,
-    voxel_origin=[-40, -40, -1],      # the original of the whole space
+    voxels1,                        # semantic occupancy predictions
+    mask_camera1,
+    voxels2,
+    mask_camera2,
+    voxel_origin=[-40, -40, -1],    # the original of the whole space
     voxel_size=[0.4, 0.4, 0.4],     # voxel size in the real world
     ratio=1,                        # scale
-    remove_free=False,
     use_mask=False,
 ):
+    # affine the frame2
+    translate = [2.398410463168375, 2.4926634755109944]
+    angle = 2.615340945414168
+    voxels2 = affine(torch.from_numpy(voxels2).permute(2, 0, 1), angle=angle, translate=translate, scale=1, shear=0, fill=17).permute(1, 2, 0).numpy()
+    # merge two frames
+    voxels = np.where(voxels1 == 17, voxels2, voxels1)
+    # voxels[(voxels == voxels2) & (voxels1 != 17) & (voxels2 != 17)] = 4
+    mask_camera = (mask_camera1 == 1) | (mask_camera2 == 1)
     h, w, z = voxels.shape
 
     # Compute the voxels coordinates
     grid_index, semantics_index, grid_coords = get_grid_coords([h, w, z], voxel_size, ratio)
+    grid_coords[:, :3] += np.array(voxel_origin, dtype=np.float32).reshape([1, 3])
 
-    if remove_free:
-        voxels = np.vstack([grid_index.T, voxels.reshape(-1)]).T
-        masks = np.vstack([grid_index.T, mask_camera.reshape(-1)]).T
-        voxels = voxels[voxels[:, 3] < 17]
-        grid_index = voxels[:, :3] // ratio
-        grid_index_mask = masks[:, :3] // ratio
-        semantics_index = np.zeros([h // ratio, w // ratio, z // ratio])
-        masks_index = semantics_index.copy()
-        semantics_index[grid_index[:, 0], grid_index[:, 1], grid_index[:, 2]] = voxels[:, 3]
-        masks_index[grid_index_mask[:, 0], grid_index_mask[:, 1], grid_index_mask[:, 2]] = masks[:, 3]
-        grid_coords[:, :3] += np.array(voxel_origin, dtype=np.float32).reshape([1, 3])
-        masks = np.vstack([grid_coords.T, masks_index.reshape(-1)]).T
-        grid_coords = np.vstack([grid_coords.T, semantics_index.reshape(-1)]).T
-    else:
-        semantics_index[grid_index[:, 0], grid_index[:, 1], grid_index[:, 2]] = \
-            voxels[grid_index[:, 0]*ratio, grid_index[:, 1]*ratio, grid_index[:, 2]*ratio]
-        grid_coords += np.array(voxel_origin, dtype=np.float32).reshape([1, 3])
-        # grid_coords: (H*W*Z, 4) with the real xyz and predicted label(0~17)
-        grid_coords = np.vstack([grid_coords.T, semantics_index.reshape(-1)]).T
-
-    # Get the voxels inside FOV
-    fov_grid_coords = grid_coords
+    voxels = np.vstack([grid_index.T, voxels.reshape(-1)]).T
+    masks = np.vstack([grid_index.T, mask_camera.reshape(-1)]).T
+    voxels = voxels[voxels[:, 3] < 17]
+    grid_index = voxels[:, :3] // ratio
+    print(grid_index)
+    grid_index_mask = masks[:, :3] // ratio
+    semantics_index = np.zeros([h // ratio, w // ratio, z // ratio])
+    masks_index = semantics_index.copy()
+    semantics_index[grid_index[:, 0], grid_index[:, 1], grid_index[:, 2]] = voxels[:, 3]
+    masks_index[grid_index_mask[:, 0], grid_index_mask[:, 1], grid_index_mask[:, 2]] = masks[:, 3]
+    grid_coords[:, :3] += np.array(voxel_origin, dtype=np.float32).reshape([1, 3])
+    masks = np.vstack([grid_coords.T, masks_index.reshape(-1)]).T
+    grid_coords = np.vstack([grid_coords.T, semantics_index.reshape(-1)]).T
 
     # Remove empty and unknown voxels (label==0)
-    fov_voxels = fov_grid_coords
+    fov_voxels = grid_coords
     if use_mask:
-        fov_voxels = fov_grid_coords[(masks[:, 3] == 1)]
+        fov_voxels = grid_coords[(masks[:, 3] == 1)]
     fov_voxels = fov_voxels[
         (fov_voxels[:, 3] > 0) & (fov_voxels[:, 3] < 17)
     ]
@@ -141,7 +142,16 @@ def draw(
 
 
 if __name__ == '__main__':
-    occ_path = './data/labels-frame01.npz'
-    occ = np.load(open(occ_path, "rb"))
+    occ_path_1 = './data/labels-frame01.npz'
+    occ_path_2 = './data/labels-frame02.npz'
+    occ1 = np.load(open(occ_path_1, "rb"))
+    occ2 = np.load(open(occ_path_2, "rb"))
+    pred_1 = './data/0001.npz'
+    pred_2 = './data/0002.npz'
+    pred_1 = np.load(open(pred_1, "rb"))
+    pred_2 = np.load(open(pred_2, "rb"))
     ratio = 1
-    draw(occ['semantics'], occ['mask_camera'], ratio=ratio, remove_free=True, use_mask=True)
+    # draw(occ1['semantics'], occ1['mask_camera'], occ2['semantics'], occ2['mask_camera'],
+    #         ratio=ratio, use_mask=True)
+    draw(pred_1['pred'], occ1['mask_camera'], pred_2['pred'], occ2['mask_camera'], 
+            ratio=ratio, use_mask=False)
