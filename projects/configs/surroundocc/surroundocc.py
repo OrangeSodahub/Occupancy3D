@@ -13,6 +13,7 @@ point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
 occ_size = [200, 200, 16]
 use_semantic = True
 use_mask = True
+use_sequential = True # test pipeline
 
 img_norm_cfg = dict(
     mean=[103.530, 116.280, 123.675], std=[1.0, 1.0, 1.0], to_rgb=False)
@@ -148,7 +149,6 @@ data = dict(
     samples_per_gpu=1,
     workers_per_gpu=4,
     train=dict(
-            is_train=True,
             type=dataset_type,
             data_root=data_root,
             ann_file='data/occ3d-nus/occ_infos_temporal_train.pkl',
@@ -162,25 +162,25 @@ data = dict(
             classes=class_names,
             box_type_3d='LiDAR'),
     val=dict(type=dataset_type,
-            is_train=False,
             data_root=data_root,
             ann_file='data/occ3d-nus/occ_infos_temporal_val.pkl',
             pipeline=test_pipeline,  
             occ_size=occ_size,
             pc_range=point_cloud_range,
             use_semantic=use_semantic,
+            use_sequential=use_sequential,
             classes=class_names,
             len_queue=len_queue,
             modality=input_modality,
             eval_fscore=True),
     test=dict(type=dataset_type,
-            is_train=False,
             data_root=data_root,
             ann_file='data/occ3d-nus/occ_infos_temporal_val.pkl',
             pipeline=test_pipeline, 
             occ_size=occ_size,
             pc_range=point_cloud_range,
             use_semantic=use_semantic,
+            use_sequential=use_sequential,
             classes=class_names,
             len_queue=len_queue,
             modality=input_modality,

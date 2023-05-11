@@ -218,13 +218,12 @@ class SurroundOcc(MVXTwoStageDetector):
         assert bs == 1 # only support bs=1
         agg_occ = [target_occ.permute(0, 3, 2, 4, 1)] # (1, bs, H, W, Z, num_classes)
         for i, prev_occ in enumerate(prev_occ_list):
-            # affine (rotate + translate)
-            # TODO: translate z-axis
-            rotation_angle = np.array(img_metas['can_bus'][-1] for img_metas in img_metas_list[:i-self.len_queue:-1]).sum()
-            translate_dist = np.array(img_metas['can_bus'][:3] for img_metas in img_metas_list[:i-self.len_queue:-1]).sum(0)
+            # affine (rotate + translate), no translation on z-axis
+            rotation_angle = np.array([img_metas['can_bus'][-1] for img_metas in img_metas_list[0][:i-self.len_queue-1:-1]]).sum()
+            translate_dist = np.array([img_metas['can_bus'][:3] for img_metas in img_metas_list[0][:i-self.len_queue-1:-1]]).sum(0)
             translate_dist = (translate_dist // self.voxel_size).round()
             prev_occ = prev_occ.permute(0, 3, 2, 4, 1).reshape(bs, H, W, -1) # (bs, H, W, Z*num_classes)
-            prev_occ[0] = affine(prev_occ[0].permute(2, 0, 1), rotate=rotation_angle, center=[W // 2, H // 2],
+            prev_occ[0] = affine(prev_occ[0].permute(2, 0, 1), angle=-rotation_angle, center=(W // 2, H // 2),
                                 translate=(translate_dist[1], translate_dist[0]), scale=1., shear=0., fill=(0.,)).permute(1, 2, 0) # NOTE: only support bs=1
             prev_occ = prev_occ.reshape(bs, H, W, Z, num_classes)
             agg_occ.append(prev_occ)
