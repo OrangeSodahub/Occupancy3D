@@ -331,7 +331,7 @@ class OccHead(nn.Module):
             # Here we downsample the `voxel_semantics` to generate low level resolution labels
             gt, mask = multiscale_supervision(voxel_semantics.clone(), ratio, pred_camera.shape, self.coords_grid, mask_camera, self.use_mask)
             gt = gt.permute(0, 2, 1, 3) # align with the pred
-            mask = mask.permute(0, 2, 1, 3)
+            mask = mask.permute(0, 2, 1, 3) if mask is not None else None
 
             if not self.use_mask:
                 loss_occ_i_c = (criterion(pred_camera, gt.long()) + sem_scal_loss(pred_camera, gt.long()) + geo_scal_loss(pred_camera, gt.long()))
@@ -349,7 +349,19 @@ class OccHead(nn.Module):
                         loss_occ_i += loss_occ_i_f + xm_loss * self.lambda_xm
 
             elif self.use_mask:
-                raise NotImplementedError
+                loss_occ_i_c = (criterion(pred_camera, gt.long(), mask) + sem_scal_loss(pred_camera, gt.long(), mask) + geo_scal_loss(pred_camera, gt.long(), mask))
+                loss_occ_i = loss_occ_i_c
+
+                # fusion loss and kl divergence
+                if self.use_points:
+                    if (not self.single_scale_fusion) or (self.single_scale_fusion and i == len(preds_dicts['occ_preds_img'])-1):
+                        pred_fusion = preds_dicts['occ_preds_fusion'][i] if not self.single_scale_fusion else preds_dicts['occ_preds_fusion'][-1]
+                        loss_occ_i_f = (criterion(pred_fusion, gt.long(), mask) + sem_scal_loss(pred_fusion, gt.long(), mask) + geo_scal_loss(pred_fusion, gt.long(), mask))
+                        xm_loss = F.kl_div(
+                            F.log_softmax(pred_camera, dim=1),
+                            F.softmax(pred_fusion.detach(), dim=1)
+                        )
+                        loss_occ_i += loss_occ_i_f + xm_loss * self.lambda_xm
             
             # focal weight
             loss_occ_i = loss_occ_i * ((0.5)**(len(preds_dicts['occ_preds_img']) - 1 -i))
