@@ -12,9 +12,9 @@ len_queue=4
 point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
 occ_size = [200, 200, 16]
 use_semantic = True
-use_mask = False
+use_mask = True
 use_points = False # knowledge distillation
-use_sequential = False # test pipeline
+use_sequential = True # test pipeline
 
 img_norm_cfg = dict(
     mean=[103.530, 116.280, 123.675], std=[1.0, 1.0, 1.0], to_rgb=False)
@@ -144,7 +144,7 @@ test_pipeline = [
     dict(type='NormalizeMultiviewImage', **img_norm_cfg),
     dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
-    dict(type='CustomCollect3D', keys=['img'])
+    dict(type='CustomCollect3D', keys=[ 'img'])
 ]
 
 find_unused_parameters = True

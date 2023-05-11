@@ -10,6 +10,7 @@ import numpy as np
 
 from mmcv.runner import auto_fp16
 from mmdet.models import DETECTORS
+from mmdet3d.models import builder
 from torchvision.transforms.functional import affine
 from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
 from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
@@ -18,6 +19,7 @@ from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 @DETECTORS.register_module()
 class SurroundOcc(MVXTwoStageDetector):
     def __init__(self,
+                 use_points=False,
                  use_grid_mask=False,
                  pts_voxel_layer=None,
                  pts_voxel_encoder=None,
@@ -28,6 +30,9 @@ class SurroundOcc(MVXTwoStageDetector):
                  img_neck=None,
                  pts_neck=None,
                  pts_bbox_head=None,
+                 occ_fuser=None,
+                 occ_encoder_backbone=None,
+                 occ_encoder_neck=None,
                  img_roi_head=None,
                  img_rpn_head=None,
                  train_cfg=None,
@@ -37,7 +42,6 @@ class SurroundOcc(MVXTwoStageDetector):
                  len_queue=4,
                  voxel_size=[0.4, 0.4, 0.4],
                  is_vis=False,
-                 version='v1',
                  ):
 
         super(SurroundOcc,
@@ -51,15 +55,19 @@ class SurroundOcc(MVXTwoStageDetector):
         self.use_grid_mask = use_grid_mask
         self.fp16_enabled = False
 
+        self.occ_fuser = builder.build_fusion_layer(occ_fuser) if occ_fuser is not None else None
+        self.occ_encoder_backbone = builder.build_backbone(occ_encoder_backbone) if occ_encoder_backbone is not None else None
+        self.occ_encoder_neck = builder.build_neck(occ_encoder_neck) if occ_encoder_neck is not None else None
+
+        self.use_points = use_points
         self.use_semantic = use_semantic
         self.is_vis = is_vis
 
+        # only use when use_sequential is True
         self.len_queue = len_queue
         self.voxel_size = voxel_size
-        # only save `len_queue` previous occ preds
-        self.prev_occ_list = []
-        # TODO: for now, only support one gpu with batch size = 1
-        self.curr_scene_token = None
+        self.prev_occ_list = [] # only save `len_queue` previous occ preds
+        self.curr_scene_token = None # TODO: for now, only support one gpu with batch size = 1
 
     def extract_img_feat(self, img, img_metas, len_queue=None):
         """Extract features of images."""
@@ -95,23 +103,43 @@ class SurroundOcc(MVXTwoStageDetector):
                 img_feats_reshaped.append(img_feat.view(B, int(BN / B), C, H, W))
         return img_feats_reshaped
 
+    def extract_pts_feat(self, points):
+        """Extract features of points."""
+        voxels, num_points, coors = self.voxelize(points)
+        voxel_features = self.pts_voxel_encoder(voxels, num_points, coors)
+        batch_size = coors[-1, 0] + 1
+        pts_feats = self.pts_middle_encoder(voxel_features, coors, batch_size)
+        return pts_feats
+
     @auto_fp16(apply_to=('img'))
-    def extract_feat(self, img, img_metas=None, len_queue=None):
+    def extract_feat(self, img, img_metas=None, points=None, len_queue=None):
         """Extract features from images and points."""
 
+        # extract features of images
         img_feats = self.extract_img_feat(img, img_metas, len_queue=len_queue)
-        
-        return img_feats
 
+        voxel_pts_feats = None
+        # extract features of points
+        if self.use_points and points is not None:
+            voxel_pts_feats = self.extract_pts_feat(points)
+
+        return img_feats, voxel_pts_feats
 
     def forward_pts_train(self,
-                          pts_feats,
+                          img_feats,
+                          voxel_pts_feats,
                           voxel_semantics,
                           mask_camera,
                           img_metas):
-
+        feature_fuse = None
+        if self.use_points:
+            feature_fuse = dict(
+                occ_fuser=self.occ_fuser,
+                occ_encoder_backbone=self.occ_encoder_backbone,
+                occ_encoder_neck=self.occ_encoder_neck,
+            )
         outs = self.pts_bbox_head(
-            pts_feats, img_metas, is_train=True)
+            img_feats, img_metas, voxel_pts_feats, feature_fuse)
         # `voxel_semantics` only used in loss calculation
         # with multi-scale supervision
         loss_inputs = [voxel_semantics, mask_camera, outs]
@@ -138,25 +166,25 @@ class SurroundOcc(MVXTwoStageDetector):
             return self.forward_train(**kwargs)
         else:
             return self.forward_test(**kwargs)
-    
 
     @auto_fp16(apply_to=('img', 'points'))
     def forward_train(self,
                       img_metas=None,
                       img=None,
+                      points=None,
                       voxel_semantics=None,
                       mask_camera=None,
                       ):
 
-        img_feats = self.extract_feat(img=img, img_metas=img_metas)
+        img_feats, voxel_pts_feats = self.extract_feat(img=img, img_metas=img_metas, points=points)
         losses = dict()
-        losses_pts = self.forward_pts_train(img_feats, voxel_semantics, mask_camera,
-                                             img_metas)
+        losses_pts = self.forward_pts_train(img_feats, voxel_pts_feats,
+                                            voxel_semantics, mask_camera, img_metas)
 
         losses.update(losses_pts)
         return losses
 
-    def forward_test(self, img_metas, img=None, voxel_semantics=None, **kwargs):
+    def forward_test(self, img_metas, img=None, **kwargs):
         # new scene
         # TODO: for now, only support one gpu with batch size = 1
         if self.curr_scene_token is None or img_metas[0][-1]['scene_token'] != self.curr_scene_token:
@@ -167,7 +195,8 @@ class SurroundOcc(MVXTwoStageDetector):
         output = self.simple_test(
             [img_metas[0][-1]], img, **kwargs)
         
-        pred_occ = output['occ_preds']
+        pred_occ = output['occ_preds_img']
+
         # `pred_occ` got multi-scale pred results
         # Here we only use the last one with shape of (200, 200, 16)
         # for evalution with ground truth
@@ -201,7 +230,7 @@ class SurroundOcc(MVXTwoStageDetector):
 
     def simple_test(self, img_metas, img=None, rescale=False):
         """Test function without augmentaiton."""
-        img_feats = self.extract_feat(img=img, img_metas=img_metas)
+        img_feats, _ = self.extract_feat(img=img, img_metas=img_metas)
 
         output = self.simple_test_pts(
             img_feats, img_metas, rescale=rescale)

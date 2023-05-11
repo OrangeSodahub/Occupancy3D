@@ -137,6 +137,7 @@ class CustomNuScenesOccDataset(NuScenesDataset):
         ego2lidar = transform_matrix(translation=lidar2ego_translation, rotation=Quaternion(lidar2ego_rotation),
                                      inverse=True)
         input_dict['ego2lidar'] = ego2lidar
+
         if self.modality['use_camera']:
             image_paths = []
             lidar2img_rts = []
@@ -172,6 +173,14 @@ class CustomNuScenesOccDataset(NuScenesDataset):
                     cam_intrinsic=cam_intrinsics,
                     lidar2cam=lidar2cam_rts,
                 ))
+
+        if self.modality['use_lidar']:
+            input_dict.update(
+                dict(
+                    lidar_path=info['lidar_path'],
+                    lidar2ego_rotation = info['lidar2ego_rotation'],
+                    lidar2ego_translation = info['lidar2ego_translation']
+                    ))
 
         if not self.test_mode:
             annos = self.get_ann_info(index)

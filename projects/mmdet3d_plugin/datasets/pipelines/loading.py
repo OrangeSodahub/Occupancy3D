@@ -1,12 +1,11 @@
 #import open3d as o3d
-import mmcv
-import numpy as np
-
-from mmdet3d.core.points import BasePoints, get_points_type
-from mmdet.datasets.builder import PIPELINES
-from mmdet.datasets.pipelines import LoadAnnotations, LoadImageFromFile
-import random
 import os
+import numpy as np
+from mmdet3d.datasets.builder import PIPELINES
+from mmdet3d.core.points import get_points_type
+from nuscenes.utils.geometry_utils import Quaternion
+from nuscenes.utils.data_classes import LidarPointCloud
+from mmdet3d.datasets.pipelines.loading import LoadPointsFromFile
 
 
 @PIPELINES.register_module()
@@ -47,3 +46,50 @@ class LoadOccupancy(object):
         repr_str = self.__class__.__name__
         return repr_str
 
+
+def transform(pc, lidar2ego_trans, lidar2ego_rots):
+    pc = LidarPointCloud(pc.T)
+    pc.rotate(Quaternion(lidar2ego_rots).rotation_matrix)
+    pc.translate(np.array(lidar2ego_trans))
+    return pc.points.T
+
+@PIPELINES.register_module()
+class LoadOccPointsFromFile(LoadPointsFromFile):
+    def __init__(self, coord_type, load_dim=6, use_dim=[0, 1, 2], shift_height=False, use_color=False, file_client_args=dict(backend='disk')):
+        super().__init__(coord_type, load_dim, use_dim, shift_height, use_color, file_client_args)
+
+    def __call__(self, results):
+        pts_filename = results['lidar_path']
+        points = self._load_points(pts_filename)
+        points = points.reshape(-1, self.load_dim)
+        points = points[:, self.use_dim]
+        attribute_dims = None
+
+        if self.shift_height:
+            floor_height = np.percentile(points[:, 2], 0.99)
+            height = points[:, 2] - floor_height
+            points = np.concatenate(
+                [points[:, :3],
+                 np.expand_dims(height, 1), points[:, 3:]], 1)
+            attribute_dims = dict(height=3)
+
+        if self.use_color:
+            assert len(self.use_dim) >= 6
+            if attribute_dims is None:
+                attribute_dims = dict()
+            attribute_dims.update(
+                dict(color=[
+                    points.shape[1] - 3,
+                    points.shape[1] - 2,
+                    points.shape[1] - 1,
+                ]))
+
+        # transform points to ego vehicle coord
+        points[:, :4] = transform(points[:, :4], results['lidar2ego_translation'], results['lidar2ego_rotation'])
+        
+        points_class = get_points_type(self.coord_type)
+        points = points_class(
+            points, points_dim=points.shape[-1], attribute_dims=attribute_dims)
+        results['points'] = points
+
+        return results
