@@ -4,13 +4,13 @@
 #  Modified by Zhiqi Li
 # ---------------------------------------------
 
+import os
 import torch
-import mmdet3d
 import numpy as np
-import time, yaml, os
 
-from mmcv.runner import force_fp32, auto_fp16
+from mmcv.runner import auto_fp16
 from mmdet.models import DETECTORS
+from torchvision.transforms.functional import affine
 from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
 from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 
@@ -34,6 +34,8 @@ class SurroundOcc(MVXTwoStageDetector):
                  test_cfg=None,
                  pretrained=None,
                  use_semantic=True,
+                 len_queue=4,
+                 voxel_size=[0.4, 0.4, 0.4],
                  is_vis=False,
                  version='v1',
                  ):
@@ -51,8 +53,13 @@ class SurroundOcc(MVXTwoStageDetector):
 
         self.use_semantic = use_semantic
         self.is_vis = is_vis
-                  
 
+        self.len_queue = len_queue
+        self.voxel_size = voxel_size
+        # only save `len_queue` previous occ preds
+        self.prev_occ_list = []
+        # TODO: for now, only support one gpu with batch size = 1
+        self.curr_scene_token = None
 
     def extract_img_feat(self, img, img_metas, len_queue=None):
         """Extract features of images."""
@@ -150,17 +157,28 @@ class SurroundOcc(MVXTwoStageDetector):
         return losses
 
     def forward_test(self, img_metas, img=None, voxel_semantics=None, **kwargs):
-        
+        # new scene
+        # TODO: for now, only support one gpu with batch size = 1
+        if self.curr_scene_token is None or img_metas[0][-1]['scene_token'] != self.curr_scene_token:
+            self.prev_occ_list = []
+            self.curr_scene_token = img_metas[0][-1]['scene_token']
+
+        # get the occ pred of current frame
         output = self.simple_test(
-            img_metas, img, **kwargs)
+            [img_metas[0][-1]], img, **kwargs)
         
         pred_occ = output['occ_preds']
-
         # `pred_occ` got multi-scale pred results
         # Here we only use the last one with shape of (200, 200, 16)
         # for evalution with ground truth
         if type(pred_occ) == list:
             pred_occ = pred_occ[-1]
+
+        # merge the occ pred of multi frames
+        pred_occ = self.merge_multi_frame_preds(pred_occ, img_metas, self.prev_occ_list)
+        self.prev_occ_list.append(pred_occ)
+        while len(self.prev_occ_list) > self.len_queue:
+            self.prev_occ_list.pop(0)
         
         if self.is_vis:
             self.generate_output(pred_occ, img_metas)
@@ -185,11 +203,34 @@ class SurroundOcc(MVXTwoStageDetector):
         """Test function without augmentaiton."""
         img_feats = self.extract_feat(img=img, img_metas=img_metas)
 
-        bbox_list = [dict() for i in range(len(img_metas))]
         output = self.simple_test_pts(
             img_feats, img_metas, rescale=rescale)
 
         return output
+
+    def merge_multi_frame_preds(self, target_occ, img_metas_list, prev_occ_list):
+        """Only used in offline test pipeline
+        :param target_occ: shape (bs, num_classes, W, H, Z)
+        """
+        # TODO for now, only support one gpu with batch size = 1
+        assert len(img_metas_list[0])-1 == len(prev_occ_list)
+        bs, num_classes, W, H, Z = target_occ.shape
+        assert bs == 1 # only support bs=1
+        agg_occ = [target_occ.permute(0, 3, 2, 4, 1)] # (1, bs, H, W, Z, num_classes)
+        for i, prev_occ in enumerate(prev_occ_list):
+            # affine (rotate + translate), no translation on z-axis
+            rotation_angle = np.array([img_metas['can_bus'][-1] for img_metas in img_metas_list[0][:i-self.len_queue-1:-1]]).sum()
+            translate_dist = np.array([img_metas['can_bus'][:3] for img_metas in img_metas_list[0][:i-self.len_queue-1:-1]]).sum(0)
+            translate_dist = (translate_dist // self.voxel_size).round()
+            prev_occ = prev_occ.permute(0, 3, 2, 4, 1).reshape(bs, H, W, -1) # (bs, H, W, Z*num_classes)
+            prev_occ[0] = affine(prev_occ[0].permute(2, 0, 1), angle=-rotation_angle, center=(W // 2, H // 2),
+                                translate=(translate_dist[1], translate_dist[0]), scale=1., shear=0., fill=(0.,)).permute(1, 2, 0) # NOTE: only support bs=1
+            prev_occ = prev_occ.reshape(bs, H, W, Z, num_classes)
+            agg_occ.append(prev_occ)
+        agg_occ = torch.stack(agg_occ) # (len_queue, bs, H, W, Z, num_classes)
+        agg_occ = agg_occ.mean(0) # (bs, H, W, Z, num_classes)
+        agg_occ = agg_occ.permute(0, 4, 2, 1, 3) # (bs, num_classes, W, H, Z)
+        return agg_occ
 
     # TODO: modify this
     def generate_output(self, pred_occ, img_metas):

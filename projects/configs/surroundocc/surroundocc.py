@@ -8,10 +8,12 @@ plugin_dir = 'projects/mmdet3d_plugin/'
 
 # If point cloud range is changed, the models should also change their point
 # cloud range accordingly
+len_queue=4
 point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
 occ_size = [200, 200, 16]
 use_semantic = True
 use_mask = True
+use_sequential = True # test pipeline
 
 img_norm_cfg = dict(
     mean=[103.530, 116.280, 123.675], std=[1.0, 1.0, 1.0], to_rgb=False)
@@ -79,6 +81,7 @@ model = dict(
         img_channels=[512, 512, 512],
         use_semantic=use_semantic,
         use_mask=use_mask,
+        len_queue=len_queue,
         transformer_template=dict(
             type='PerceptionTransformer',
             embed_dims=_dim_,
@@ -165,7 +168,9 @@ data = dict(
             occ_size=occ_size,
             pc_range=point_cloud_range,
             use_semantic=use_semantic,
+            use_sequential=use_sequential,
             classes=class_names,
+            len_queue=len_queue,
             modality=input_modality,
             eval_fscore=True),
     test=dict(type=dataset_type,
@@ -175,7 +180,9 @@ data = dict(
             occ_size=occ_size,
             pc_range=point_cloud_range,
             use_semantic=use_semantic,
+            use_sequential=use_sequential,
             classes=class_names,
+            len_queue=len_queue,
             modality=input_modality,
             eval_fscore=True),
     shuffler_sampler=dict(type='DistributedGroupSampler'),

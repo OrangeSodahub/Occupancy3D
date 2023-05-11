@@ -76,7 +76,7 @@ class OccEncoder(TransformerLayerSequence):
 
     # This function must use fp32!!!
     @force_fp32(apply_to=('reference_points', 'img_metas'))
-    def point_sampling(self, reference_points, pc_range,  img_metas):
+    def point_sampling(self, reference_points, pc_range, img_metas):
         ego2lidar=img_metas[0]['ego2lidar']
         lidar2img = []
 
