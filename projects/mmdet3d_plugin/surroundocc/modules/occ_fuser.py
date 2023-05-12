@@ -30,7 +30,7 @@ class OccFuser(nn.Module):
             nn.Conv3d(2*self.embed_dims[0], self.embed_dims[0], 7, padding=3, bias=False),
             build_norm_layer(norm_cfg, self.embed_dims[0])[1],
             nn.ReLU(inplace=True),
-            nn.Conv3d(self.embed_dims[0], 1, 1, padding=0, bais=False),
+            nn.Conv3d(self.embed_dims[0], 1, 1, padding=0, bias=False),
             nn.Sigmoid(),
         )
 
@@ -53,7 +53,7 @@ class OccFuser(nn.Module):
     def forward(self, occ_feats, img_feats):
 
         # TODO: now only support fuse the last layer (dim=16)
-        img_feat = img_feat[0].permute(0, 1, 3, 4, 2)
+        img_feat = img_feats[0].permute(0, 1, 3, 4, 2)
         for i, occ_feat in enumerate(occ_feats):
             if i != len(occ_feats) - 1:
                 continue

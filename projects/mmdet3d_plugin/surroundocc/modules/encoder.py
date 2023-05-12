@@ -86,6 +86,14 @@ class OccEncoder(TransformerLayerSequence):
         lidar2img = reference_points.new_tensor(lidar2img)  # (B, N, 4, 4)
         ego2lidar = reference_points.new_tensor(ego2lidar)
 
+        # post rots and trans
+        post_rots, post_trans = img_metas[0]['post_rots'].to(lidar2img), img_metas[0]['post_trans'].to(lidar2img)
+        for i in range(lidar2img.shape[1]):
+            post = torch.eye(4).unsqueeze(0).unsqueeze(0).to(lidar2img)
+            post[:, :, :3, :3] = post_rots[:, i, :, :]
+            post[:, :, :3, 3] = post_trans[:, i, :]
+            lidar2img[:, i, :, :] = torch.matmul(post, lidar2img[:, i, :, :])
+
         reference_points = reference_points.clone()
         reference_points[..., 0:1] = reference_points[..., 0:1] * \
             (pc_range[3] - pc_range[0]) + pc_range[0]
@@ -112,12 +120,6 @@ class OccEncoder(TransformerLayerSequence):
                                     torch.matmul(lidar2img.to(torch.float32),
                                                 ego2lidar.to(torch.float32)),
                                     reference_points.to(torch.float32)).squeeze(-1) # (1, B, num_cam, num_query, 3)
-
-        # post rots and trans
-        num_cam = reference_points_cam.shape[2]
-        post_rots, post_trans = img_metas[0]['post_rots'], img_metas[0]['post_trans']
-        for i in range(num_cam):
-            reference_points_cam[:, :, i, ...] = reference_points_cam[:, :, i, ...].matmul(post_rots[i].T) + post_trans[i:i + 1, :]
 
         eps = 1e-5
 
