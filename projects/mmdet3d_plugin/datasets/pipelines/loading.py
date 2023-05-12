@@ -282,6 +282,8 @@ class PointToMultiViewDepth(object):
         depth_map_list = []
         for cid in range(len(results['cam_names'])):
             cam_name = results['cam_names'][cid]
+
+            # lidar to ego (lidar frame)
             lidar2lidarego = np.eye(4, dtype=np.float32)
             lidar2lidarego[:3, :3] = Quaternion(
                 results['curr']['lidar2ego_rotation']).rotation_matrix
@@ -294,6 +296,7 @@ class PointToMultiViewDepth(object):
             lidarego2global[:3, 3] = results['curr']['ego2global_translation']
             lidarego2global = torch.from_numpy(lidarego2global)
 
+            # camera to ego (camera frame)
             cam2camego = np.eye(4, dtype=np.float32)
             cam2camego[:3, :3] = Quaternion(
                 results['curr']['cams'][cam_name]

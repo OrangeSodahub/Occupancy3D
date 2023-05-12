@@ -106,12 +106,19 @@ class OccEncoder(TransformerLayerSequence):
 
         lidar2img = lidar2img.view(
             1, B, num_cam, 1, 4, 4).repeat(D, 1, 1, num_query, 1, 1)
+        ego2lidar=ego2lidar.view(1, B, 1, 1, 4, 4).repeat(D, 1, num_cam, num_query, 1, 1)
 
-        ego2lidar=ego2lidar.view(1,1,1,1,4,4).repeat(D, 1, num_cam, num_query, 1, 1)
         reference_points_cam = torch.matmul(
                                     torch.matmul(lidar2img.to(torch.float32),
                                                 ego2lidar.to(torch.float32)),
-                                    reference_points.to(torch.float32)).squeeze(-1)
+                                    reference_points.to(torch.float32)).squeeze(-1) # (1, B, num_cam, num_query, 3)
+
+        # post rots and trans
+        num_cam = reference_points_cam.shape[2]
+        post_rots, post_trans = img_metas[0]['post_rots'], img_metas[0]['post_trans']
+        for i in range(num_cam):
+            reference_points_cam[:, :, i, ...] = reference_points_cam[:, :, i, ...].matmul(post_rots[i].T) + post_trans[i:i + 1, :]
+
         eps = 1e-5
 
         volume_mask = (reference_points_cam[..., 2:3] > eps)

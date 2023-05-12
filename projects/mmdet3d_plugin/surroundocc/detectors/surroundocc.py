@@ -14,6 +14,10 @@ from mmdet.models.builder import build_neck, build_backbone
 from mmdet.models.backbones.resnet import ResNet
 from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
 from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
+try:
+    import wandb
+except:
+    pass
 
 
 @DETECTORS.register_module()
@@ -313,8 +317,19 @@ class SurroundOcc(MVXTwoStageDetector):
 
         # occ branch
         # TODO: add feature fuser
+        img_metas[0].update(dict(
+            post_rots=img_inputs[4],
+            post_trans=img_inputs[5],
+        ))
         losses_occ = self.forward_pts_train(mlvl_feats, voxel_semantics, mask_camera, img_metas)
         losses.update(losses_occ)
+
+        # record the losses via wandb
+        try:
+            wandb.log(losses)
+        except:
+            pass
+
         return losses
 
     def forward_test(self, img_metas, img=None, voxel_semantics=None, **kwargs):
