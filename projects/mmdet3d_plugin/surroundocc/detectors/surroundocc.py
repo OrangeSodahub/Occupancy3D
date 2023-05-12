@@ -26,7 +26,7 @@ class SurroundOcc(MVXTwoStageDetector):
                  img_backbone=None,
                  img_view_transformer=None,
                  img_bev_encoder_backbone=None,
-                 img_encoder_neck=None,
+                 img_bev_encoder_neck=None,
                  pts_backbone=None,
                  img_neck=None,
                  pts_neck=None,
@@ -51,7 +51,7 @@ class SurroundOcc(MVXTwoStageDetector):
             True, True, rotate=1, offset=False, ratio=0.5, mode=1, prob=0.7)
         self.img_view_transformer = build_neck(img_view_transformer)
         self.img_bev_encoder_backbone = build_backbone(img_bev_encoder_backbone)
-        self.img_bev_encoder_neck = build_neck(img_encoder_neck)
+        self.img_bev_encoder_neck = build_neck(img_bev_encoder_neck)
 
         self.use_grid_mask = use_grid_mask
         self.fp16_enabled = False
@@ -62,10 +62,12 @@ class SurroundOcc(MVXTwoStageDetector):
         # BEVDet4D
         num_adj = 1
         self.num_frame = num_adj + 1
-        self.with_prev = True
-        self.align_after_view_transfromation = False
         self.extra_ref_frames = 1
+        self.temporal_frame = self.num_frame
         self.num_frame += self.extra_ref_frames
+        # TODO
+        self.with_prev = False
+        self.align_after_view_transfromation = False
                   
     def prepare_inputs(self, inputs, stereo=False):
         # split the inputs into each frame
@@ -74,6 +76,7 @@ class SurroundOcc(MVXTwoStageDetector):
         imgs = inputs[0].view(B, N, self.num_frame, C, H, W)
         imgs = torch.split(imgs, 1, 2)
         imgs = [t.squeeze(2) for t in imgs]
+        # TODO: bda?
         sensor2egos, ego2globals, intrins, post_rots, post_trans, bda = \
             inputs[1:7]
 
@@ -206,7 +209,7 @@ class SurroundOcc(MVXTwoStageDetector):
         if not self.with_prev:
             bev_feat_key = bev_feat_list[0]
             if len(bev_feat_key.shape) == 4:
-                b,c,h,w = bev_feat_key.shape
+                b, c, h, w = bev_feat_key.shape
                 bev_feat_list = \
                     [torch.zeros([b,
                                   c * (self.num_frame -

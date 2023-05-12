@@ -47,8 +47,14 @@ grid_config = {
     'depth': [1.0, 45.0, 0.5],
 }
 
+_dim_ = [128, 256, 512]
+_ffn_dim_ = [256, 512, 1024]
+volume_h_ = [100, 50, 25]
+volume_w_ = [100, 50, 25]
+volume_z_ = [8, 4, 2]
+_num_points_ = [2, 4, 8]
+_num_layers_ = [1, 3, 6]
 numC_Trans = 64
-
 multi_adj_frame_id_cfg = (1, 1+1, 1)
 
 input_modality = dict(
@@ -60,7 +66,6 @@ input_modality = dict(
 
 model = dict(
     type='SurroundOcc',
-    stage='stage1',
     use_grid_mask=True,
     use_semantic=use_semantic,
     img_backbone=dict(
@@ -109,7 +114,57 @@ model = dict(
     img_bev_encoder_neck=dict(type='LSSFPN3D',
                               in_channels=numC_Trans*7,
                               out_channels=numC_Trans),
-    # TODO: add pts_bbox_head
+    pts_bbox_head=dict(
+        type='OccHead',
+        volume_h=volume_h_,
+        volume_w=volume_w_,
+        volume_z=volume_z_,
+        occ_size=occ_size,
+        num_query=900,
+        num_classes=18,
+        conv_input=[_dim_[2], 256, _dim_[1], 128, _dim_[0], 64, 64],
+        conv_output=[256, _dim_[1], 128, _dim_[0], 64, 64, 32],
+        out_indices=[0, 2, 4, 6],
+        upsample_strides=[1, 2, 1, 2, 1, 2, 1],
+        embed_dims=_dim_,
+        img_channels=[512, 512, 512],
+        use_semantic=use_semantic,
+        use_mask=use_mask,
+        transformer_template=dict(
+            type='PerceptionTransformer',
+            embed_dims=_dim_,
+            encoder=dict(
+                type='OccEncoder',
+                num_layers=_num_layers_,
+                pc_range=point_cloud_range,
+                return_intermediate=False,
+                transformerlayers=dict(
+                    type='OccLayer',
+                    attn_cfgs=[
+                        dict(
+                            type='SpatialCrossAttention',
+                            pc_range=point_cloud_range,
+                            deformable_attention=dict(
+                                type='MSDeformableAttention3D',
+                                embed_dims=_dim_,
+                                num_points=_num_points_,
+                                num_levels=1),
+                            embed_dims=_dim_,
+                        )
+                    ],
+                    feedforward_channels=_ffn_dim_,
+                    ffn_dropout=0.1,
+                    embed_dims=_dim_,
+                    conv_num=2,
+                    operation_order=('cross_attn', 'norm',
+                                     'ffn', 'norm', 'conv')))),
+    ce_loss_cfg=dict(
+        type='CrossEntropyLoss',
+        use_sigmoid=False,
+        loss_weight=1.0),
+    geo_loss=True,
+    sem_loss=True,
+    ),
 )
 
 dataset_type = 'CustomNuScenesOccDataset'
@@ -123,8 +178,6 @@ train_pipeline = [
     dict(type='LoadOccupancy', data_root=occ_gt_data_root, use_semantic=use_semantic),
     # TODO: fix depth gt
     # dict(type='LoadDepthGT', data_root=depth_gt_data_root),
-    dict(type='NormalizeMultiviewImage', **img_norm_cfg),
-    dict(type='PadMultiViewImage', size_divisor=32),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
     dict(type='CustomCollect3D', keys=['img_inputs', 'voxel_semantics', 'mask_camera', 'depth_gt'])
 ]

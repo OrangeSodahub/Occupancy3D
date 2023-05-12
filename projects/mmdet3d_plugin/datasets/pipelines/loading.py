@@ -137,6 +137,7 @@ class PrepareImageInputs(object):
         # adjust image
         img = img.resize(resize_dims)
         img = img.crop(crop)
+        print(img.shape)
         if flip:
             img = img.transpose(method=Image.FLIP_LEFT_RIGHT)
         img = img.rotate(rotate)
@@ -239,6 +240,7 @@ class PrepareImageInputs(object):
                                    rotate=rotate)
 
             # for convenience, make augmentation matrices 3x3
+            # TODO: need to modify the ego2Lidar, Lidar2sensor
             post_tran = torch.zeros(3)
             post_rot = torch.eye(3)
             post_tran[:2] = post_tran2
@@ -266,6 +268,7 @@ class PrepareImageInputs(object):
             post_trans.append(post_tran)
 
         if self.sequential:
+            # all adjacent images uses the same augmentations
             for adj_info in results['adjacent']:
                 post_trans.extend(post_trans[:len(cam_names)])
                 post_rots.extend(post_rots[:len(cam_names)])
