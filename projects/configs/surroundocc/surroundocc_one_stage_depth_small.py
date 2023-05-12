@@ -53,14 +53,14 @@ bda_aug_conf = dict(
     flip_dx_ratio=0.5,
     flip_dy_ratio=0.5)
 
-_dim_ = [128, 256, 512]
-_ffn_dim_ = [256, 512, 1024]
+_dim_ = [64, 128, 256]
+_ffn_dim_ = [128, 256, 512]
 volume_h_ = [100, 50, 25]
 volume_w_ = [100, 50, 25]
 volume_z_ = [8, 4, 2]
 _num_points_ = [2, 4, 8]
 _num_layers_ = [1, 3, 6]
-numC_Trans = 64
+numC_Trans = 32
 multi_adj_frame_id_cfg = (1, 1+1, 1)
 
 input_modality = dict(
@@ -76,21 +76,21 @@ model = dict(
     use_semantic=use_semantic,
     img_backbone=dict(
         type='ResNet',
-        depth=101,
+        depth=50,
         num_stages=4,
         out_indices=(0, 2, 3),
         frozen_stages=1,
         norm_cfg=dict(type='BN2d', requires_grad=False),
         norm_eval=True,
         style='caffe',
-        #with_cp=True, # using checkpoint to save GPU memory
+        # with_cp=True, # using checkpoint to save GPU memory
         dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False), # original DCNv2 will print log when perform load_state_dict
         stage_with_dcn=(False, False, True, True)),
     # TODO: verify
     img_neck=dict(
         type='FPN',
         in_channels=[1024, 2048],
-        out_channels=512,
+        out_channels=256,
         start_level=0,
         add_extra_convs='on_output',
         num_outs=3,
@@ -100,7 +100,7 @@ model = dict(
         grid_config=grid_config,
         input_size=data_config['input_size'],
         # equals to `out_channels` in `img_neck
-        in_channels=512,
+        in_channels=256,
         out_channels=numC_Trans,
         sid=False,
         collapse_z=False,
@@ -129,12 +129,12 @@ model = dict(
         occ_size=occ_size,
         num_query=900,
         num_classes=18,
-        conv_input=[_dim_[2], 256, _dim_[1], 128, _dim_[0], 64, 64],
-        conv_output=[256, _dim_[1], 128, _dim_[0], 64, 64, 32],
+        conv_input=[_dim_[2], 128, _dim_[1], 64, _dim_[0], 32, 32],
+        conv_output=[128, _dim_[1], 64, _dim_[0], 32, 32, 16],
         out_indices=[0, 2, 4, 6],
         upsample_strides=[1, 2, 1, 2, 1, 2, 1],
         embed_dims=_dim_,
-        img_channels=[512, 512, 512],
+        img_channels=[256, 256, 256],
         use_semantic=use_semantic,
         use_mask=use_mask,
         transformer_template=dict(
