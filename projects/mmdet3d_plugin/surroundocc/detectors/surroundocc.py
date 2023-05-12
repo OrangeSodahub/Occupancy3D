@@ -11,6 +11,7 @@ import numpy as np
 from mmdet.models import DETECTORS
 from mmcv.runner import auto_fp16, force_fp32
 from mmdet.models.builder import build_neck, build_backbone
+from mmdet.models.backbones.resnet import ResNet
 from mmdet3d.models.detectors.mvx_two_stage import MVXTwoStageDetector
 from projects.mmdet3d_plugin.models.utils.grid_mask import GridMask
 
@@ -123,46 +124,60 @@ class SurroundOcc(MVXTwoStageDetector):
         return imgs, sensor2keyegos, ego2globals, intrins, post_rots, post_trans, \
                bda, curr2adjsensor                
 
-    def encode_image(self, img, img_metas, len_queue=None):
-        """Extract features of images."""
-        B = img.size(0)
-        if img is not None:
-            # input_shape = img.shape[-2:]
-            # # update real input shape of each single img
-            # for img_meta in img_metas:
-            #     img_meta.update(input_shape=input_shape)
-
-            if img.dim() == 5 and img.size(0) == 1:
-                img.squeeze_(0)
-            elif img.dim() == 5 and img.size(0) > 1:
-                B, N, C, H, W = img.size()
-                img = img.reshape(B * N, C, H, W)
-            if self.use_grid_mask:
-                img = self.grid_mask(img)
-
-            img_feats = self.img_backbone(img)
-            if isinstance(img_feats, dict):
-                img_feats = list(img_feats.values())
+    def extract_stereo_ref_feat(self, x):
+        B, N, C, imH, imW = x.shape
+        x = x.view(B * N, C, imH, imW)
+        assert isinstance(self.img_backbone, ResNet):
+        if self.img_backbone.deep_stem:
+            x = self.img_backbone.stem(x)
         else:
-            return None
-        if self.with_img_neck:
-            img_feats = self.img_neck(img_feats)
+            x = self.img_backbone.conv1(x)
+            x = self.img_backbone.norm1(x)
+            x = self.img_backbone.relu(x)
+        x = self.img_backbone.maxpool(x)
+        for i, layer_name in enumerate(self.img_backbone.res_layers):
+            res_layer = getattr(self.img_backbone, layer_name)
+            x = res_layer(x)
+            return x
 
-        img_feats_reshaped = []
-        for img_feat in img_feats:
-            BN, C, H, W = img_feat.size()
-            if len_queue is not None:
-                img_feats_reshaped.append(img_feat.view(int(B/len_queue), len_queue, int(BN / B), C, H, W))
-            else:
-                img_feats_reshaped.append(img_feat.view(B, int(BN / B), C, H, W))
-        return img_feats_reshaped
+    def encode_image(self, imgs, img_metas, stereo=False, len_queue=None):
+        """Extract features of images."""
+        B, N, C, imH, imW = imgs.shape
+        imgs = imgs.view(B * N, C, imH, imW)
+        if self.use_grid_mask:
+            imgs = self.grid_mask(imgs)
+        x = self.img_backbone(imgs)
+        stereo_feat = None
+        if stereo:
+            stereo_feat = x[0]
+            x = x[1:]
+        x = self.img_neck(x)
+        if type(x) in [list, tuple]:
+            x = x[0]
+        _, output_dim, ouput_H, output_W = x.shape
+        x = x.view(B, N, output_dim, ouput_H, output_W)
+        return x, stereo_feat
 
-    def prepare_bev_feat(self, img, rot, tran, intrin, post_rot, post_tran,
-                         bda, mlp_input):
-        x = self.encode_image(img)
+    def prepare_bev_feat(self, img, sensor2keyego, ego2global, intrin,
+                         post_rot, post_tran, bda, mlp_input, feat_prev_iv,
+                         k2s_sensor, extra_ref_frame):
+        if extra_ref_frame:
+            stereo_feat = self.extract_stereo_ref_feat(img)
+            return None, None, stereo_feat
+        x, stereo_feat = self.encode_image(img, stereo=True)
+        metas = dict(k2s_sensor=k2s_sensor,
+                     intrins=intrin,
+                     post_rots=post_rot,
+                     post_trans=post_tran,
+                     frustum=self.img_view_transformer.cv_frustum.to(x),
+                     cv_downsample=4,
+                     downsample=self.img_view_transformer.downsample,
+                     grid_config=self.img_view_transformer.grid_config,
+                     cv_feat_list=[feat_prev_iv, stereo_feat])
         bev_feat, depth = self.img_view_transformer(
-            [x, rot, tran, intrin, post_rot, post_tran, bda, mlp_input])
-        return bev_feat, depth
+            [x, sensor2keyego, ego2global, intrin, post_rot, post_tran, bda,
+             mlp_input], metas)
+        return bev_feat, depth, stereo_feat
 
     @force_fp32()
     def bev_encoder(self, x):
