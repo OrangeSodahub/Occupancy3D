@@ -9,12 +9,10 @@ from mmcv.cnn import build_conv_layer
 from mmcv.runner import BaseModule, force_fp32
 from mmdet.models.builder import NECKS
 from mmdet.models.backbones.resnet import BasicBlock
-
-# TODO: add this feature
 try:
     from mmdet3d.ops.bev_pool_v2.bev_pool import bev_pool_v2
 except:
-    pass
+    print("Install bev_pool_v2 from BEVDet or newer version of mmdet3d")
 
 
 @NECKS.register_module()
@@ -722,7 +720,10 @@ class LSSViewTransformerBEVDepth(LSSViewTransformer):
                 depth_labels,
                 reduction='none',
             ).sum() / max(1.0, fg_mask.sum())
-        return self.loss_depth_weight * depth_loss
+
+        loss_depth = dict(loss_depth=self.loss_depth_weight * depth_loss)
+            
+        return loss_depth
 
     def forward(self, input, stereo_metas=None):
         (x, rots, trans, intrins, post_rots, post_trans, bda,

@@ -547,6 +547,8 @@ class PrepareImageInputs(object):
         post_rots = torch.stack(post_rots)
         post_trans = torch.stack(post_trans)
         results['canvas'] = canvas
+        results['img_shape'] = list(imgs.shape[2:])
+        
         return (imgs, sensor2egos, ego2globals, intrins, post_rots, post_trans)
 
     def __call__(self, results):

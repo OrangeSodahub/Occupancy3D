@@ -127,7 +127,7 @@ class SurroundOcc(MVXTwoStageDetector):
     def extract_stereo_ref_feat(self, x):
         B, N, C, imH, imW = x.shape
         x = x.view(B * N, C, imH, imW)
-        assert isinstance(self.img_backbone, ResNet):
+        assert isinstance(self.img_backbone, ResNet)
         if self.img_backbone.deep_stem:
             x = self.img_backbone.stem(x)
         else:
@@ -140,23 +140,26 @@ class SurroundOcc(MVXTwoStageDetector):
             x = res_layer(x)
             return x
 
-    def encode_image(self, imgs, img_metas, stereo=False, len_queue=None):
+    def encode_image(self, imgs, stereo=False, len_queue=None):
         """Extract features of images."""
         B, N, C, imH, imW = imgs.shape
         imgs = imgs.view(B * N, C, imH, imW)
-        if self.use_grid_mask:
-            imgs = self.grid_mask(imgs)
+        # TODO: augmentation?
+        # if self.use_grid_mask:
+        #     imgs = self.grid_mask(imgs)
         x = self.img_backbone(imgs)
         stereo_feat = None
         if stereo:
             stereo_feat = x[0]
             x = x[1:]
         x = self.img_neck(x)
-        if type(x) in [list, tuple]:
-            x = x[0]
-        _, output_dim, ouput_H, output_W = x.shape
-        x = x.view(B, N, output_dim, ouput_H, output_W)
-        return x, stereo_feat
+        reshape_x = []
+        for x_ in x:
+            _, output_dim, ouput_H, output_W = x_.shape
+            x_ = x_.view(B, N, output_dim, ouput_H, output_W)
+            reshape_x.append(x_)
+
+        return reshape_x, stereo_feat
 
     def prepare_bev_feat(self, img, sensor2keyego, ego2global, intrin,
                          post_rot, post_tran, bda, mlp_input, feat_prev_iv,
@@ -164,7 +167,8 @@ class SurroundOcc(MVXTwoStageDetector):
         if extra_ref_frame:
             stereo_feat = self.extract_stereo_ref_feat(img)
             return None, None, stereo_feat
-        x, stereo_feat = self.encode_image(img, stereo=True)
+        mlvl_feats, stereo_feat = self.encode_image(img, stereo=True)
+        x = mlvl_feats[0]
         metas = dict(k2s_sensor=k2s_sensor,
                      intrins=intrin,
                      post_rots=post_rot,
@@ -177,7 +181,7 @@ class SurroundOcc(MVXTwoStageDetector):
         bev_feat, depth = self.img_view_transformer(
             [x, sensor2keyego, ego2global, intrin, post_rot, post_tran, bda,
              mlp_input], metas)
-        return bev_feat, depth, stereo_feat
+        return bev_feat, depth, stereo_feat, mlvl_feats
 
     @force_fp32()
     def bev_encoder(self, x):
@@ -211,12 +215,12 @@ class SurroundOcc(MVXTwoStageDetector):
                                feat_prev_iv, curr2adjsensor[fid],
                                extra_ref_frame)
                 if key_frame:
-                    bev_feat, depth, feat_curr_iv = \
+                    bev_feat, depth, feat_curr_iv, mlvl_feats = \
                         self.prepare_bev_feat(*inputs_curr)
                     depth_key_frame = depth
                 else:
                     with torch.no_grad():
-                        bev_feat, depth, feat_curr_iv = \
+                        bev_feat, depth, feat_curr_iv, mlvl_feats = \
                             self.prepare_bev_feat(*inputs_curr)
                 if not extra_ref_frame:
                     bev_feat_list.append(bev_feat)
@@ -246,15 +250,15 @@ class SurroundOcc(MVXTwoStageDetector):
                                        bda)
         bev_feat = torch.cat(bev_feat_list, dim=1)
         x = self.bev_encoder(bev_feat)
-        return [x], depth_key_frame
+        return [x], depth_key_frame, mlvl_feats
 
     @auto_fp16(apply_to=('img'))
     def extract_feat(self, img_inputs, img_metas=None, len_queue=None):
         """Extract features from images and points."""
 
-        img_feats, depth = self.extract_img_feat(img_inputs, img_metas, len_queue=len_queue)
+        img_feats, depth, mlvl_feats = self.extract_img_feat(img_inputs, img_metas, len_queue=len_queue)
         
-        return img_feats, depth
+        return img_feats, depth, mlvl_feats
 
     def forward_pts_train(self,
                           pts_feats,
@@ -300,7 +304,7 @@ class SurroundOcc(MVXTwoStageDetector):
                       ):
 
         # extract image features
-        img_feats, depth = self.extract_feat(img_inputs=img_inputs, img_metas=img_metas)
+        img_feats, depth, mlvl_feats = self.extract_feat(img_inputs=img_inputs, img_metas=img_metas)
 
         losses = dict()
         # depth branch
@@ -309,7 +313,7 @@ class SurroundOcc(MVXTwoStageDetector):
 
         # occ branch
         # TODO: add feature fuser
-        losses_occ = self.forward_pts_train(img_feats, voxel_semantics, mask_camera, img_metas)
+        losses_occ = self.forward_pts_train(mlvl_feats, voxel_semantics, mask_camera, img_metas)
         losses.update(losses_occ)
         return losses
 

@@ -31,7 +31,7 @@ def multiscale_supervision(voxel_semantics, ratio, gt_shape, original_coords, ma
                                                                             mask_camera_with_coords[:, 3]
     return gt, mask
 
-def geo_scal_loss(pred, ssc_target, mask, semantic=True):
+def geo_scal_loss(pred, ssc_target, mask=None, semantic=True):
 
     # Get softmax probabilities
     if semantic:
@@ -44,6 +44,8 @@ def geo_scal_loss(pred, ssc_target, mask, semantic=True):
     nonempty_probs = 1 - empty_probs
 
     # Remove unknown voxels
+    if mask is None:
+        mask = ssc_target != 255
     nonempty_target = ssc_target != 17
     nonempty_target = nonempty_target[mask].float()
     nonempty_probs = nonempty_probs[mask]
@@ -60,7 +62,7 @@ def geo_scal_loss(pred, ssc_target, mask, semantic=True):
     )
 
 
-def sem_scal_loss(pred, ssc_target, mask):
+def sem_scal_loss(pred, ssc_target, mask=None):
     # Get softmax probabilities
     pred = F.softmax(pred, dim=1)
     loss = 0
@@ -72,6 +74,8 @@ def sem_scal_loss(pred, ssc_target, mask):
         p = pred[:, i, :, :, :]
 
         # Remove unknown voxels
+        if mask is None:
+            mask = ssc_target != 255
         target_ori = ssc_target
         p = p[mask]
         target = ssc_target[mask]
