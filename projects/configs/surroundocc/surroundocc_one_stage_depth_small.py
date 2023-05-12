@@ -165,6 +165,10 @@ model = dict(
                     conv_num=2,
                     operation_order=('cross_attn', 'norm',
                                      'ffn', 'norm', 'conv')))),
+    occ_fuser=dict(
+        type='OccFuser',
+        img_dims=[numC_Trans],
+    ),
     ce_loss_cfg=dict(
         type='CrossEntropyLoss',
         use_sigmoid=False,

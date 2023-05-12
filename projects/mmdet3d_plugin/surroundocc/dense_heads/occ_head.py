@@ -13,6 +13,7 @@ import torch.nn.functional as F
 from mmdet.models import HEADS
 from mmdet.models.builder import build_loss
 from mmdet.models.utils import build_transformer
+from mmdet3d.models import build_fusion_layer
 from mmcv.runner import force_fp32, auto_fp16
 from mmcv.cnn.utils.weight_init import constant_init
 from mmcv.cnn import build_conv_layer, build_norm_layer, build_upsample_layer
@@ -34,6 +35,7 @@ class OccHead(nn.Module):
                  occ_size=[200, 200, 16],
                  upsample_strides=[1, 2, 1, 2],
                  out_indices=[0, 2, 4, 6],
+                 occ_fuser=None,
                  conv_input=None,
                  conv_output=None,
                  embed_dims=None,
@@ -62,6 +64,10 @@ class OccHead(nn.Module):
         self.upsample_strides = upsample_strides
         self.out_indices = out_indices
         self.transformer_template = transformer_template
+
+        occ_dims = [conv_output[out_indice] for out_indice in out_indices]
+        occ_fuser.update(occ_dims=occ_dims)
+        self.occ_fuser = build_fusion_layer(occ_fuser)
 
         assert ce_loss_cfg is not None
         self.ce_loss = build_loss(ce_loss_cfg)
@@ -207,7 +213,7 @@ class OccHead(nn.Module):
                 constant_init(m.conv_offset, 0)
 
     @auto_fp16(apply_to=('mlvl_feats'))
-    def forward(self, mlvl_feats, img_metas):
+    def forward(self, mlvl_feats, img_feats, img_metas):
 
         # image feature map shape: (B, N, C, H, W)
         bs, num_cam, _, _, _ = mlvl_feats[0].shape
@@ -272,7 +278,10 @@ class OccHead(nn.Module):
             elif i < len(self.deblocks) - 2:  # we do not add skip connection at level 0
                 volume_embed_temp = volume_embed_reshape.pop()
                 result = result + volume_embed_temp
-            
+
+        # feature fusion
+        outputs = self.occ_fuser(outputs, img_feats)
+
         occ_preds = []
         # `self.occ` transform the feature dimension of fused volume feature to `num_classes`
         # `occ_pred: (bs, num_classes, W, H, Z)`

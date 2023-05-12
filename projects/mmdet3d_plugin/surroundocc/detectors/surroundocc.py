@@ -266,11 +266,12 @@ class SurroundOcc(MVXTwoStageDetector):
 
     def forward_pts_train(self,
                           pts_feats,
+                          img_feats,
                           voxel_semantics,
                           mask_camera,
                           img_metas):
         losses = dict()
-        occ_pred = self.pts_bbox_head(pts_feats, img_metas)
+        occ_pred = self.pts_bbox_head(pts_feats, img_feats, img_metas)
         loss_inputs = [voxel_semantics, mask_camera, occ_pred]
         losses_occ = self.pts_bbox_head.loss(*loss_inputs, img_metas=img_metas)
         losses.update(losses_occ)
@@ -321,7 +322,7 @@ class SurroundOcc(MVXTwoStageDetector):
             post_rots=img_inputs[4],
             post_trans=img_inputs[5],
         ))
-        losses_occ = self.forward_pts_train(mlvl_feats, voxel_semantics, mask_camera, img_metas)
+        losses_occ = self.forward_pts_train(mlvl_feats, img_feats, voxel_semantics, mask_camera, img_metas)
         losses.update(losses_occ)
 
         # record the losses via wandb
