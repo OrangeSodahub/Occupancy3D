@@ -234,10 +234,10 @@ class SurroundOcc(MVXTwoStageDetector):
         return [x], depth_key_frame
 
     @auto_fp16(apply_to=('img'))
-    def extract_feat(self, img, img_metas=None, len_queue=None):
+    def extract_feat(self, img_inputs, img_metas=None, len_queue=None):
         """Extract features from images and points."""
 
-        img_feats, depth = self.extract_img_feat(img, img_metas, len_queue=len_queue)
+        img_feats, depth = self.extract_img_feat(img_inputs, img_metas, len_queue=len_queue)
         
         return img_feats, depth
 
@@ -278,14 +278,14 @@ class SurroundOcc(MVXTwoStageDetector):
     @auto_fp16(apply_to=('img', 'points'))
     def forward_train(self,
                       img_metas=None,
-                      img=None,
+                      img_inputs=None,
                       voxel_semantics=None,
                       mask_camera=None,
                       depth_gt=None,
                       ):
 
         # extract image features
-        img_feats, depth = self.extract_feat(img=img, img_metas=img_metas)
+        img_feats, depth = self.extract_feat(img_inputs=img_inputs, img_metas=img_metas)
 
         losses = dict()
         # depth branch

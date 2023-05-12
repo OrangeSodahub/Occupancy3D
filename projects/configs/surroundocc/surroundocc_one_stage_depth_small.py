@@ -47,6 +47,12 @@ grid_config = {
     'depth': [1.0, 45.0, 0.5],
 }
 
+bda_aug_conf = dict(
+    rot_lim=(-0., 0.),
+    scale_lim=(1., 1.),
+    flip_dx_ratio=0.5,
+    flip_dy_ratio=0.5)
+
 _dim_ = [128, 256, 512]
 _ffn_dim_ = [256, 512, 1024]
 volume_h_ = [100, 50, 25]
@@ -175,9 +181,9 @@ depth_gt_data_root='data/depth_gt'
 
 train_pipeline = [
     dict(type='PrepareImageInputs', is_train=True, data_config=data_config, sequential=True),
-    dict(type='LoadOccupancy', data_root=occ_gt_data_root, use_semantic=use_semantic),
-    # TODO: fix depth gt
-    # dict(type='LoadDepthGT', data_root=depth_gt_data_root),
+    dict(type='LoadOccupancy', data_root=occ_gt_data_root, use_semantic=use_semantic, bda_aug_conf=bda_aug_conf, is_train=True),
+    dict(type='LoadPointsFromFile', coord_type='LIDAR', load_dim=5, use_dim=5, file_client_args=file_client_args),
+    dict(type='PointToMultiViewDepth', downsample=1, grid_config=grid_config),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
     dict(type='CustomCollect3D', keys=['img_inputs', 'voxel_semantics', 'mask_camera', 'depth_gt'])
 ]

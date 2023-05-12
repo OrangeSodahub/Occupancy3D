@@ -1,3 +1,3 @@
 from .internimage import  InternImage
 from .custom_layer_decay_optimizer_constructor import CustomLayerDecayOptimizerConstructor
-from .resnet3d import CustomResNet3d
+from .resnet3d import CustomResNet3D

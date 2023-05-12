@@ -2,11 +2,13 @@
 
 import torch
 import torch.nn as nn
-from mmcv.cnn import build_norm_layer
-
 from torch.utils.checkpoint import checkpoint
-from mmdet3d.models.backbones.resnet import ConvModule
+
 from mmdet.models import NECKS
+try:
+    from mmdet3d.models.backbones.resnet import ConvModule
+except:
+    from mmcv.cnn.bricks.conv_module import ConvModule
 
 
 @NECKS.register_module()
