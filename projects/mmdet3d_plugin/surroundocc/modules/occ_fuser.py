@@ -15,22 +15,22 @@ class OccFuser(nn.Module):
             norm_cfg = dict(type='BN3d', eps=1e-3, momentum=0.01)
 
         self.img_enc = nn.Sequential(
-            nn.Conv3d(self.embed_dims[0], self.embed_dims[0], 7, padding=3, bias=False),
-            build_norm_layer(norm_cfg, self.embed_dims[0])[1],
+            nn.Conv3d(self.embed_dims[-1], self.embed_dims[-1], 7, padding=3, bias=False),
+            build_norm_layer(norm_cfg, self.embed_dims[-1])[1],
             nn.ReLU(inplace=True),
         )
 
         self.occ_enc = nn.Sequential(
-            nn.Conv3d(self.embed_dims[0], self.embed_dims[0], 7, padding=3, bias=False),
-            build_norm_layer(norm_cfg, self.embed_dims[0])[1],
+            nn.Conv3d(self.embed_dims[-1], self.embed_dims[-1], 7, padding=3, bias=False),
+            build_norm_layer(norm_cfg, self.embed_dims[-1])[1],
             nn.ReLU(inplace=True),
         )
 
         self.vis_enc = nn.Sequential(
-            nn.Conv3d(2*self.embed_dims[0], self.embed_dims[0], 7, padding=3, bias=False),
-            build_norm_layer(norm_cfg, self.embed_dims[0])[1],
+            nn.Conv3d(2*self.embed_dims[-1], self.embed_dims[-1], 7, padding=3, bias=False),
+            build_norm_layer(norm_cfg, self.embed_dims[-1])[1],
             nn.ReLU(inplace=True),
-            nn.Conv3d(self.embed_dims[0], 1, 1, padding=0, bias=False),
+            nn.Conv3d(self.embed_dims[-1], 1, 1, padding=0, bias=False),
             nn.Sigmoid(),
         )
 
