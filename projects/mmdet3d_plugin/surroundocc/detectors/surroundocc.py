@@ -317,7 +317,6 @@ class SurroundOcc(MVXTwoStageDetector):
         losses.update(losses_depth)
 
         # occ branch
-        # TODO: add feature fuser
         img_metas[0].update(dict(
             post_rots=img_inputs[4],
             post_trans=img_inputs[5],
@@ -335,6 +334,10 @@ class SurroundOcc(MVXTwoStageDetector):
 
     def forward_test(self, img_metas, img_inputs=None, voxel_semantics=None, **kwargs):
         
+        img_metas[0].update(dict(
+            post_rots=img_inputs[4],
+            post_trans=img_inputs[5],
+        ))
         output = self.simple_test(
             img_metas, img_inputs, **kwargs)
         

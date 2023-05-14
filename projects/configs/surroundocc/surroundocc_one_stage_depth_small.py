@@ -196,6 +196,8 @@ train_pipeline = [
 
 test_pipeline = [
     dict(type='PrepareImageInputs', data_config=data_config, sequential=True),
+    # TODO: optimze this
+    dict(type='LoadOccupancy', data_root=occ_gt_data_root, use_semantic=use_semantic, bda_aug_conf=bda_aug_conf, is_train=False),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
     dict(type='CustomCollect3D', keys=['img_inputs'])
 ]
