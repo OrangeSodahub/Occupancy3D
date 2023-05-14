@@ -81,7 +81,6 @@ class SurroundOcc(MVXTwoStageDetector):
         imgs = inputs[0].view(B, N, self.num_frame, C, H, W)
         imgs = torch.split(imgs, 1, 2)
         imgs = [t.squeeze(2) for t in imgs]
-        # TODO: bda?
         sensor2egos, ego2globals, intrins, post_rots, post_trans, bda = \
             inputs[1:7]
 

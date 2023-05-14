@@ -75,7 +75,6 @@ class NormalizeMultiviewImage(object):
         self.std = np.array(std, dtype=np.float32)
         self.to_rgb = to_rgb
 
-
     def __call__(self, results):
         """Call function to normalize images.
         Args:
@@ -252,7 +251,7 @@ class CustomCollect3D(object):
                             'pcd_scale_factor', 'pcd_rotation', 'pts_filename',
                             'transformation_3d_flow', 'scene_token',
                             'can_bus', 'pc_range', 'occ_size', 'occ_path', 'lidar_token',
-                            'depth_path', 'cam_intrinsic'
+                            'depth_path', 'cam_intrinsic', 'flip_dx', 'flip_dy'
                             )):
         self.keys = keys
         self.meta_keys = meta_keys

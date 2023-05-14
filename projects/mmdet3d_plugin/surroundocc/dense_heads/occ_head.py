@@ -290,7 +290,7 @@ class OccHead(nn.Module):
             occ_preds.append(occ_pred)
        
         outs = {
-            'volume_embed': volume_embed,
+            # 'volume_embed': volume_embed,
             'occ_preds': occ_preds,
         }
 
@@ -302,6 +302,13 @@ class OccHead(nn.Module):
              mask_camera,
              preds_dicts,
              img_metas):
+     
+        # bda
+        for i in range(len(preds_dicts['occ_preds'])):
+            if img_metas[0]['flip_dx']:
+                preds_dicts['occ_preds'][i] = preds_dicts['occ_preds'][i].flip(2)
+            if img_metas[0]['flip_dy']:
+                preds_dicts['occ_preds'][i] = preds_dicts['occ_preds'][i].flip(1)
      
         if not self.use_semantic:
             loss_dict = {}

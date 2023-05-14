@@ -86,14 +86,18 @@ class LoadOccupancy(object):
         results['img_inputs'] = (imgs, rots, trans, intrins, post_rots,
                                  post_trans, bda_rot)
         if 'voxel_semantics' in results:
+            results['flip_dx'] = False
+            results['flip_dy'] = False
             if flip_dx:
                 results['voxel_semantics'] = results['voxel_semantics'][::-1,...].copy()
                 results['mask_lidar'] = results['mask_lidar'][::-1,...].copy()
                 results['mask_camera'] = results['mask_camera'][::-1,...].copy()
+                results['flip_dx'] = True
             if flip_dy:
                 results['voxel_semantics'] = results['voxel_semantics'][:,::-1,...].copy()
                 results['mask_lidar'] = results['mask_lidar'][:,::-1,...].copy()
                 results['mask_camera'] = results['mask_camera'][:,::-1,...].copy()
+                results['flip_dy'] = True
 
         return results
 
@@ -404,17 +408,6 @@ class PrepareImageInputs(object):
         img = img.rotate(rotate)
         return img
 
-    def choose_cams(self):
-        if self.is_train and self.data_config['Ncams'] < len(
-                self.data_config['cams']):
-            cam_names = np.random.choice(
-                self.data_config['cams'],
-                self.data_config['Ncams'],
-                replace=False)
-        else:
-            cam_names = self.data_config['cams']
-        return cam_names
-
     def sample_augmentation(self, H, W, flip=None, scale=None):
         fH, fW = self.data_config['input_size']
         if self.is_train:
@@ -473,11 +466,9 @@ class PrepareImageInputs(object):
         intrins = []
         post_rots = []
         post_trans = []
-        cam_names = self.choose_cams()
+        cam_names = results['curr']['cams'].keys()
         results['cam_names'] = cam_names
-        canvas = []
-        for cam_name in cam_names:
-            cam_data = results['curr']['cams'][cam_name]
+        for cam_name, cam_data in results['curr']['cams'].items():
             filename = cam_data['data_path']
             img = Image.open(filename)
             post_rot = torch.eye(2)
@@ -501,13 +492,11 @@ class PrepareImageInputs(object):
                                    rotate=rotate)
 
             # for convenience, make augmentation matrices 3x3
-            # TODO: need to modify the ego2Lidar, Lidar2sensor
             post_tran = torch.zeros(3)
             post_rot = torch.eye(3)
             post_tran[:2] = post_tran2
             post_rot[:2, :2] = post_rot2
 
-            canvas.append(np.array(img))
             imgs.append(self.normalize_img(img))
 
             if self.sequential:
@@ -549,7 +538,6 @@ class PrepareImageInputs(object):
         intrins = torch.stack(intrins)
         post_rots = torch.stack(post_rots)
         post_trans = torch.stack(post_trans)
-        results['canvas'] = canvas
         results['img_shape'] = list(imgs.shape[2:])
         
         return (imgs, sensor2egos, ego2globals, intrins, post_rots, post_trans)
