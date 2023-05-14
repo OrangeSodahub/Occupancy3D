@@ -171,7 +171,7 @@ class SurroundOcc(MVXTwoStageDetector):
             stereo_feat = self.extract_stereo_ref_feat(img)
             return None, None, stereo_feat
         mlvl_feats, stereo_feat = self.encode_image(img, stereo=True)
-        x = mlvl_feats[0]
+        x = mlvl_feats[1]
         metas = dict(k2s_sensor=k2s_sensor,
                      intrins=intrin,
                      post_rots=post_rot,
@@ -221,6 +221,7 @@ class SurroundOcc(MVXTwoStageDetector):
                     bev_feat, depth, feat_curr_iv, mlvl_feats = \
                         self.prepare_bev_feat(*inputs_curr)
                     depth_key_frame = depth
+                    mlvl_feats_key_frame = mlvl_feats
                 else:
                     with torch.no_grad():
                         bev_feat, depth, feat_curr_iv, mlvl_feats = \
@@ -253,7 +254,7 @@ class SurroundOcc(MVXTwoStageDetector):
                                        bda)
         bev_feat = torch.cat(bev_feat_list, dim=1)
         x = self.bev_encoder(bev_feat)
-        return [x], depth_key_frame, mlvl_feats
+        return [x], depth_key_frame, mlvl_feats_key_frame
 
     @auto_fp16(apply_to=('img'))
     def extract_feat(self, img_inputs, img_metas=None, len_queue=None):

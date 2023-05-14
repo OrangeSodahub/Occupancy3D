@@ -47,11 +47,12 @@ grid_config = {
     'depth': [1.0, 45.0, 0.5],
 }
 
+# TODO: fix flip
 bda_aug_conf = dict(
     rot_lim=(-0., 0.),
     scale_lim=(1., 1.),
-    flip_dx_ratio=0.5,
-    flip_dy_ratio=0.5)
+    flip_dx_ratio=0.,
+    flip_dy_ratio=0.)
 
 _dim_ = [64, 128, 256]
 _ffn_dim_ = [128, 256, 512]
@@ -76,9 +77,9 @@ model = dict(
     use_semantic=use_semantic,
     img_backbone=dict(
         type='ResNet',
-        depth=50,
+        depth=101,
         num_stages=4,
-        out_indices=(0, 2, 3),
+        out_indices=(0, 1, 2, 3),
         frozen_stages=1,
         norm_cfg=dict(type='BN2d', requires_grad=False),
         norm_eval=True,
@@ -89,7 +90,7 @@ model = dict(
     # TODO: verify
     img_neck=dict(
         type='FPN',
-        in_channels=[1024, 2048],
+        in_channels=[512, 1024, 2048],
         out_channels=256,
         start_level=0,
         add_extra_convs='on_output',
@@ -104,7 +105,7 @@ model = dict(
         out_channels=numC_Trans,
         sid=False,
         collapse_z=False,
-        loss_depth_weight=0.05,
+        loss_depth_weight=0.5,
         depthnet_cfg=dict(use_dcn=False,
                           aspp_mid_channels=96,
                           stereo=True,
