@@ -28,7 +28,7 @@ data_config = {
     ],
     'Ncams':
     6,
-    'input_size': (256, 704),
+    'input_size': (768, 1408),
     'src_size': (900, 1600),
 
     # Augmentation
@@ -194,9 +194,7 @@ train_pipeline = [
 ]
 
 test_pipeline = [
-    dict(type='LoadMultiViewImageFromFiles', to_float32=True),
-    dict(type='NormalizeMultiviewImage', **img_norm_cfg),
-    dict(type='PadMultiViewImage', size_divisor=32),
+    dict(type='PrepareImageInputs', data_config=data_config, sequential=True),
     dict(type='DefaultFormatBundle3D', class_names=class_names, with_label=False),
     dict(type='CustomCollect3D', keys=['img_inputs'])
 ]
