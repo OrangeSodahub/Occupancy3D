@@ -225,9 +225,9 @@ class PointToMultiViewDepth(object):
 
 def mmlabNormalize(img):
     from mmcv.image.photometric import imnormalize
-    mean = np.array([123.675, 116.28, 103.53], dtype=np.float32)
+    mean = np.array([103.530, 116.280, 123.675], dtype=np.float32)
     std = np.array([1.0, 1.0, 1.0], dtype=np.float32)
-    to_rgb = True
+    to_rgb = False
     img = imnormalize(np.array(img), mean, std, to_rgb)
     img = torch.tensor(img).float().permute(2, 0, 1).contiguous()
     return img
@@ -249,11 +249,16 @@ class PrepareImageInputs(object):
         data_config,
         is_train=False,
         sequential=False,
+        file_client_args=dict(backend='disk'),
+        to_float32=True,
     ):
         self.is_train = is_train
         self.data_config = data_config
         self.normalize_img = mmlabNormalize
         self.sequential = sequential
+        self.file_client_args = file_client_args.copy()
+        self.file_client = mmcv.FileClient(**self.file_client_args)
+        self.to_float32 = to_float32
 
     def get_rot(self, h):
         return torch.Tensor([
@@ -343,6 +348,13 @@ class PrepareImageInputs(object):
         ego2global[:3, -1] = ego2global_tran
         return sensor2ego, ego2global
 
+    def load_img(self, filename):
+        img_bytes = self.file_client.get(filename)
+        img = mmcv.imfrombytes(img_bytes, flag='color', channel_order='bgr')
+        if self.to_float32:
+            img = img.astype(np.float32)
+        return img
+
     def get_inputs(self, results, flip=None, scale=None):
         imgs = []
         sensor2egos = []
@@ -354,7 +366,9 @@ class PrepareImageInputs(object):
         results['cam_names'] = cam_names
         for cam_name, cam_data in results['curr']['cams'].items():
             filename = cam_data['data_path']
-            img = Image.open(filename)
+            # TODO: need to check
+            img = self.load_img(filename)
+            img = Image.fromarray(img.astype(np.uint8))
             post_rot = torch.eye(2)
             post_tran = torch.zeros(2)
 
@@ -381,19 +395,22 @@ class PrepareImageInputs(object):
             post_tran[:2] = post_tran2
             post_rot[:2, :2] = post_rot2
 
+            img = np.array(img, dtype=np.float32)
             imgs.append(self.normalize_img(img))
 
             if self.sequential:
                 assert 'adjacent' in results
                 for adj_info in results['adjacent']:
                     filename_adj = adj_info['cams'][cam_name]['data_path']
-                    img_adjacent = Image.open(filename_adj)
+                    img_adjacent = self.load_img(filename_adj)
+                    img_adjacent = Image.fromarray(img_adjacent.astype(np.uint8))
                     img_adjacent = self.img_transform_core(
                         img_adjacent,
                         resize_dims=resize_dims,
                         crop=crop,
                         flip=flip,
                         rotate=rotate)
+                    img = np.array(img, dtype=np.float32)
                     imgs.append(self.normalize_img(img_adjacent))
             intrins.append(intrin)
             sensor2egos.append(sensor2ego)
