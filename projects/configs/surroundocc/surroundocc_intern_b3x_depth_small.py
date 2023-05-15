@@ -63,6 +63,7 @@ _num_points_ = [2, 4, 8]
 _num_layers_ = [1, 3, 6]
 numC_Trans = 32
 multi_adj_frame_id_cfg = (1, 1+1, 1)
+pretrained = 'https://huggingface.co/OpenGVLab/InternImage/resolve/main/mask_rcnn_internimage_b_fpn_3x_coco.pth'
 
 input_modality = dict(
     use_lidar=False,
@@ -76,21 +77,25 @@ model = dict(
     use_grid_mask=True,
     use_semantic=use_semantic,
     img_backbone=dict(
-        type='ResNet',
-        depth=101,
-        num_stages=4,
-        out_indices=(0, 1, 2, 3),
-        frozen_stages=1,
-        norm_cfg=dict(type='BN2d', requires_grad=False),
-        norm_eval=True,
-        style='caffe',
-        # with_cp=True, # using checkpoint to save GPU memory
-        dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False), # original DCNv2 will print log when perform load_state_dict
-        stage_with_dcn=(False, False, True, True)),
-    # TODO: verify
+        type='InternImage',
+        corp_op='DCNv3',
+        channels=112,
+        depths=[4, 4, 21, 4],
+        groups=[7, 14, 28, 56],
+        mlp_ratio=4.,
+        drop_path_rate=0.4,
+        norm_layer='LN',
+        layer_scale=1.0,
+        offset_scale=1.0,
+        post_norm=True,
+        # TODO: need to check
+        with_cp=True,
+        out_indices=(1, 2, 3),
+        init_cfg=dict(type='Pretrained', checkpoint=pretrained)),
     img_neck=dict(
         type='FPN',
-        in_channels=[512, 1024, 2048],
+        # TODO: maybe mismatch with the depth network
+        in_channels=[224, 448, 896],
         out_channels=256,
         start_level=0,
         add_extra_convs='on_output',

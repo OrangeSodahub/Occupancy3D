@@ -37,8 +37,6 @@ class OccFuser(nn.Module):
         self.init_align_layers()
 
     def init_align_layers(self):
-        norm_cfg = dict(type='BN3d', eps=1e-3, momentum=0.01)
-        
         # TODO: now only support fuse the last layer (dim=16)
         self.align = ConvModule(
             32,
