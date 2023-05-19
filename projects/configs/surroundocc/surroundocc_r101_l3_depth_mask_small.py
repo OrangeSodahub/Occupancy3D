@@ -12,7 +12,7 @@ point_cloud_range = [-40, -40, -1.0, 40, 40, 5.4]
 occ_size = [200, 200, 16]
 volume_size = [100, 100, 8]
 use_semantic = True
-use_mask = False
+use_mask = True
 
 img_norm_cfg = dict(
     mean=[103.530, 116.280, 123.675], std=[1.0, 1.0, 1.0], to_rgb=False)
@@ -104,7 +104,7 @@ model = dict(
         out_channels=numC_Trans,
         sid=False,
         collapse_z=False,
-        loss_depth_weight=0.5,
+        loss_depth_weight=0.2,
         depthnet_cfg=dict(use_dcn=False,
                           aspp_mid_channels=96,
                           stereo=True,

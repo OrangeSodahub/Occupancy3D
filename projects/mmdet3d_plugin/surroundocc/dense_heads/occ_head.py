@@ -344,7 +344,8 @@ class OccHead(nn.Module):
                 gt = gt.permute(0, 2, 1, 3)
                 mask = mask.permute(0, 2, 1, 3) if mask is not None else None
                 
-                if not self.use_mask:
+                # TODO: fix mask on loss
+                if not self.use_mask or (self.use_mask and ratio > 2):
                     loss_occ_i = self.ce_loss(pred.permute(0, 2, 3, 4, 1).reshape(-1, self.num_classes),
                                                                                         gt.long().reshape(-1))
                     if self.geo_loss:

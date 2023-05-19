@@ -224,7 +224,7 @@ class SurroundOcc(MVXTwoStageDetector):
                     mlvl_feats_key_frame = mlvl_feats
                 else:
                     with torch.no_grad():
-                        bev_feat, depth, feat_curr_iv, mlvl_feats = \
+                        bev_feat, depth, feat_curr_iv, _ = \
                             self.prepare_bev_feat(*inputs_curr)
                 if not extra_ref_frame:
                     bev_feat_list.append(bev_feat)

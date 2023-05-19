@@ -46,6 +46,8 @@ def geo_scal_loss(pred, ssc_target, mask=None, semantic=True):
     # Remove unknown voxels
     if mask is None:
         mask = ssc_target != 255
+    else:
+        mask = mask.bool()
     nonempty_target = ssc_target != 17
     nonempty_target = nonempty_target[mask].float()
     nonempty_probs = nonempty_probs[mask]
@@ -76,6 +78,8 @@ def sem_scal_loss(pred, ssc_target, mask=None):
         # Remove unknown voxels
         if mask is None:
             mask = ssc_target != 255
+        else:
+            mask = mask.bool()
         target_ori = ssc_target
         p = p[mask]
         target = ssc_target[mask]
@@ -108,32 +112,3 @@ def sem_scal_loss(pred, ssc_target, mask=None):
                 loss_class += loss_specificity
             loss += loss_class
     return loss / count
-
-
-def depth_loss(pred, target):
-    pass
-
-
-def BCE_ssc_loss(pred, target, alpha, mask_camera):
-    class_weights = torch.zeros((2)).float().to(pred.device)
-
-    # binary classification
-    zeros_mask = (target == 17)
-    target[zeros_mask] = 0
-    target[~zeros_mask] = 1
-
-    # TODO: remove outside camera range
-    # mask_camera = mask_camera.bool()
-    # pred = pred[mask_camera, :]
-    # target = target[mask_camera]
-    
-    class_weights[0] = 1-alpha  # empty
-    class_weights[1] = alpha    # occupied
-
-    criterion = nn.CrossEntropyLoss(
-        weight=class_weights, ignore_index=255, reduction="none"
-    )
-    loss = criterion(pred, target.long())
-    loss_mean = torch.mean(loss)
-
-    return loss_mean
