@@ -34,6 +34,9 @@ class OccFuser(nn.Module):
             nn.Sigmoid(),
         )
 
+        # NOTE: if using the small config, need to transform the
+        # feat dim from 32 to 16 for depth branch; if not, need
+        # to delete this step and `img_feat = self.align(img_feat)`
         self.init_align_layers()
 
     def init_align_layers(self):

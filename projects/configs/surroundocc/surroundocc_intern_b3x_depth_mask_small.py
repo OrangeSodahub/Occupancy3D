@@ -77,8 +77,9 @@ model = dict(
     use_grid_mask=True,
     use_semantic=use_semantic,
     img_backbone=dict(
+        _delete_=True,
         type='InternImage',
-        corp_op='DCNv3',
+        core_op='DCNv3',
         channels=112,
         depths=[4, 4, 21, 4],
         groups=[7, 14, 28, 56],
@@ -88,9 +89,8 @@ model = dict(
         layer_scale=1.0,
         offset_scale=1.0,
         post_norm=True,
-        # TODO: need to check
         with_cp=True,
-        out_indices=(1, 2, 3),
+        out_indices=(0, 1, 2, 3), # align with depth branch
         init_cfg=dict(type='Pretrained', checkpoint=pretrained)),
     img_neck=dict(
         type='FPN',
