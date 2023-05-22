@@ -54,8 +54,8 @@ bda_aug_conf = dict(
     flip_dx_ratio=0.,
     flip_dy_ratio=0.)
 
-_dim_ = [64, 128, 256]
-_ffn_dim_ = [128, 256, 512]
+_dim_ = [128, 256, 512]
+_ffn_dim_ = [256, 512, 1024]
 volume_h_ = [100, 50, 25]
 volume_w_ = [100, 50, 25]
 volume_z_ = [8, 4, 2]
@@ -85,7 +85,7 @@ model = dict(
         depths=[2, 2, 18, 2],
         num_heads=[4, 8, 16, 32],
         strides=(4, 2, 2, 2),
-        out_indices=(1, 2, 3, 4),
+        out_indices=(1, 2, 3),
         qkv_bias=True,
         qk_scale=None,
         patch_norm=True,
@@ -93,15 +93,16 @@ model = dict(
         attn_drop_rate=0.,
         drop_path_rate=0.1,
         use_abs_pos_embed=False,
-        return_stereo_feat=True,
+        return_stereo_feat=True, # return indice==0 feature
         act_cfg=dict(type='GELU'),
         norm_cfg=dict(type='LN', requires_grad=True),
         pretrain_style='official',
         output_missing_index_as_none=False),
     img_neck=dict(
         type='FPN',
-        in_channels=[512, 1024, 2048],
-        out_channels=256,
+        # return channels: (128, 256, 512, 1024)
+        in_channels=[256, 512, 1024],
+        out_channels=512,
         start_level=0,
         add_extra_convs='on_output',
         num_outs=3,
@@ -111,7 +112,7 @@ model = dict(
         grid_config=grid_config,
         input_size=data_config['input_size'],
         # equals to `out_channels` in `img_neck
-        in_channels=256,
+        in_channels=512,
         out_channels=numC_Trans,
         sid=False,
         collapse_z=False,
@@ -140,12 +141,12 @@ model = dict(
         occ_size=occ_size,
         num_query=900,
         num_classes=18,
-        conv_input=[_dim_[2], 128, _dim_[1], 64, _dim_[0], 32, 32],
-        conv_output=[128, _dim_[1], 64, _dim_[0], 32, 32, 16],
+        conv_input=[_dim_[2], 256, _dim_[1], 128, _dim_[0], 64, 64],
+        conv_output=[256, _dim_[1], 128, _dim_[0], 64, 64, 32],
         out_indices=[0, 2, 4, 6],
         upsample_strides=[1, 2, 1, 2, 1, 2, 1],
         embed_dims=_dim_,
-        img_channels=[256, 256, 256],
+        img_channels=[512, 512, 512],
         use_semantic=use_semantic,
         use_mask=use_mask,
         transformer_template=dict(

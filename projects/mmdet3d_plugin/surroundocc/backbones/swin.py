@@ -18,7 +18,7 @@ from mmcv.cnn.bricks.transformer import FFN, build_dropout
 from mmcv.cnn.utils.weight_init import constant_init
 from mmcv.cnn import build_norm_layer, trunc_normal_init, build_conv_layer
 from mmcv.runner.base_module import BaseModule, ModuleList
-from mmdet3d_plugin.surroundocc.backbones.utils import get_root_logger
+from projects.mmdet3d_plugin.surroundocc.backbones.utils import get_root_logger
 
 
 def swin_convert(ckpt):
