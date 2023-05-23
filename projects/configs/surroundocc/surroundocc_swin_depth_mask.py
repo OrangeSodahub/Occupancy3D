@@ -21,6 +21,7 @@ class_names =  ['other', 'barrier', 'bicycle', 'bus', 'car', 'construction_vehic
                 'pedestrian', 'traffic_cone', 'trailer', 'truck', 'driveable_surface',
                 'other_flat', 'sidewalk', 'terrain', 'manmade', 'vegetation', 'free']
 
+# NOTE: need to check the augmentation configurations!
 data_config = {
     'cams': [
         'CAM_FRONT_LEFT', 'CAM_FRONT', 'CAM_FRONT_RIGHT', 'CAM_BACK_LEFT',
@@ -220,7 +221,7 @@ share_data_config = dict(
     multi_adj_frame_id_cfg=multi_adj_frame_id_cfg,
 )
 
-find_unused_parameters = True
+find_unused_parameters = False
 data = dict(
     samples_per_gpu=1,
     workers_per_gpu=4,
@@ -267,11 +268,11 @@ for key in ['val', 'train', 'test']:
 optimizer = dict(
     type='AdamW',
     lr=2e-4,
+    weight_decay=0.05,
+    constructor='CustomLayerDecayOptimizerConstructor',
     paramwise_cfg=dict(
-        custom_keys={
-            'img_backbone': dict(lr_mult=0.1),
-        }),
-    weight_decay=0.01)
+        num_layers=33, layer_decay_rate=1.0,
+                       depths=[4, 4, 21,4]))
 
 optimizer_config = dict(grad_clip=dict(max_norm=35, norm_type=2))
 # learning policy
@@ -283,9 +284,8 @@ lr_config = dict(
     min_lr_ratio=1e-3)
 total_epochs = 24
 evaluation = dict(interval=1, pipeline=test_pipeline)
-
+load_from="ckpts/bevdet-stbase-4d-stereo-512x1408-cbgs.pth"
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
-load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
 log_config = dict(
     interval=50,
     hooks=[
