@@ -220,7 +220,8 @@ share_data_config = dict(
     multi_adj_frame_id_cfg=multi_adj_frame_id_cfg,
 )
 
-find_unused_parameters = True
+# NOTE: make sure that no unused arguments
+find_unused_parameters = False
 data = dict(
     samples_per_gpu=1,
     workers_per_gpu=4,
@@ -285,7 +286,7 @@ total_epochs = 24
 evaluation = dict(interval=1, pipeline=test_pipeline)
 
 runner = dict(type='EpochBasedRunner', max_epochs=total_epochs)
-load_from = 'ckpts/r101_dcn_fcos3d_pretrain.pth'
+load_from = 'ckpts/bevdet-stbase-4d-stereo-512x1408-cbgs.pth'
 log_config = dict(
     interval=50,
     hooks=[
