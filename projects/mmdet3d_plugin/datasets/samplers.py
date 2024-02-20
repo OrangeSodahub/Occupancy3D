@@ -1,14 +1,16 @@
-
-# Copyright (c) OpenMMLab. All rights reserved.
 import math
-
 import numpy as np
 import torch
-from mmcv.runner import get_dist_info
 from torch.utils.data import Sampler
-from .sampler import SAMPLER
-import random
-from IPython import embed
+from torch.utils.data import DistributedSampler as _DistributedSampler
+from mmcv.runner import get_dist_info
+from mmcv.utils.registry import Registry, build_from_cfg
+
+SAMPLER = Registry('sampler')
+
+
+def build_sampler(cfg, default_args):
+    return build_from_cfg(cfg, SAMPLER, default_args)
 
 
 @SAMPLER.register_module()
@@ -108,3 +110,38 @@ class DistributedGroupSampler(Sampler):
     def set_epoch(self, epoch):
         self.epoch = epoch
 
+
+@SAMPLER.register_module()
+class DistributedSampler(_DistributedSampler):
+
+    def __init__(self,
+                 dataset=None,
+                 num_replicas=None,
+                 rank=None,
+                 shuffle=True,
+                 seed=0):
+        super().__init__(
+            dataset, num_replicas=num_replicas, rank=rank, shuffle=shuffle)
+        # for the compatibility from PyTorch 1.3+
+        self.seed = seed if seed is not None else 0
+
+    def __iter__(self):
+        # deterministically shuffle based on epoch
+        if self.shuffle:
+            assert False
+        else:
+            indices = torch.arange(len(self.dataset)).tolist()
+
+        # add extra samples to make it evenly divisible
+        # in case that indices is shorter than half of total_size
+        indices = (indices *
+                   math.ceil(self.total_size / len(indices)))[:self.total_size]
+        assert len(indices) == self.total_size
+
+        # subsample
+        per_replicas = self.total_size//self.num_replicas
+        # indices = indices[self.rank:self.total_size:self.num_replicas]
+        indices = indices[self.rank*per_replicas:(self.rank+1)*per_replicas]
+        assert len(indices) == self.num_samples
+
+        return iter(indices)

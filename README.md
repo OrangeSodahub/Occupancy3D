@@ -1,115 +1,143 @@
-# SurroundOcc
-### [Project Page](https://weiyithu.github.io/SurroundOcc/) | [Paper](https://arxiv.org/abs/2303.09551) | [Video](https://cloud.tsinghua.edu.cn/d/97b74c039b8d4fd48830/) | [Data](https://cloud.tsinghua.edu.cn/d/8dcb547238144d08a0bb/)
-<br/>
+### Instructions for development
 
-> SurroundOcc: Multi-Camera 3D Occupancy Prediction for Autonomous Driving  
-> [Yi Wei*](https://weiyithu.github.io/), [Linqing Zhao*](https://github.com/lqzhao), [Wenzhao Zheng](https://scholar.google.com/citations?user=LdK9scgAAAAJ&hl=en), [Zheng Zhu](http://www.zhengzhu.net/), [Jiwen Lu](http://ivg.au.tsinghua.edu.cn/Jiwen_Lu/), [Jie Zhou](https://scholar.google.com/citations?user=6a79aPwAAAAJ&hl=en&authuser=1)  
+#### Install
 
-## News
-- [2022/3/21]: Support for private data. You can try both occupancy prediction method and ground truth generation pipeline on your own data. 
-- [2022/3/17]: Initial code and paper release. 
-- [2022/2/27]: Demo release.
+Following https://mmdetection3d.readthedocs.io/en/latest/getting_started.html#installation
 
-## Demo  
-Demos are a little bit large; please wait a moment to load them. If you cannot load them or feel them blurry, you can click the hyperlink of each demo for the full-resolution raw video. Welcome to the home page for more demos and detailed introductions. 
-
-### [Occupancy prediction:](https://cloud.tsinghua.edu.cn/f/f7768f1f110c414297cc/)
-
-<p align='center'>
-<img src="./assets/demo1.gif" width="720px">
-<img src="./assets/bar.jpg" width="720px">
-</p>
-
-### [Generated dense occupancy labels:](https://cloud.tsinghua.edu.cn/f/65d91a4c891f447da731/)
-<p align='center'>
-<img src="./assets/demo2.gif" width="720px">
-</p>
-
-
-## Introduction
-Towards a more comprehensive and consistent scene reconstruction, in this paper, we propose a SurroundOcc method to predict the volumetric occupancy with multi-camera images. We first extract multi-scale features for each image and adopt spatial cross attention to lift them to the 3D volume space. Then we apply 3D convolutions to progressively upsample the volume features and impose supervision on multiple levels. To train the multi-camera 3D scene reconstruction model, we design a pipeline to generate dense occupancy ground truth with sparse LiDAR points. The generation pipeline only needs existed 3D detection and 3D semantic segmentation labels without extra human annotations. Specifically, we fuse multi-frame LiDAR points of dynamic objects and static scenes separately. Then we adopt Poisson Reconstruction to fill the holes and voxelize the mesh to get dense volumetric occupancy.
-
-## Method 
-
-Method Pipeline:
-
-<p align='center'>
-<img src="./assets/pipeline.jpg" width="720px">
-</p>
-
-Occupancy Ground Truth Generation Pipeline:
-
-<p align='center'>
-<img src="./assets/groundtruth_pipeline.jpg" width="800px">
-</p>
-
-## Getting Started
-- [Installation](docs/install.md) 
-- [Prepare Dataset](docs/data.md)
-- [Train, Eval and Visualize](docs/run.md)
-
-You can download our pretrained model for [3D semantic occupancy prediction](https://cloud.tsinghua.edu.cn/f/7b2887a8fe3f472c8566/?dl=1) and [3D scene reconstruction tasks](https://cloud.tsinghua.edu.cn/f/ca595f31c8bd4ec49cf7/?dl=1). The difference is whether use semantic labels to train the model. The models are trained on 8 RTX 3090s with about 2.5 days.  
-
-## Try your own data
-### Occupancy prediction
-You can try our nuScenes [pretrained model](https://cloud.tsinghua.edu.cn/f/7b2887a8fe3f472c8566/?dl=1) on your own data!  Here we give a template in-the-wild [data](https://cloud.tsinghua.edu.cn/f/48bd4b3e88f64ed7b76b/?dl=1) and [pickle file](https://cloud.tsinghua.edu.cn/f/5c710efd78854c529705/?dl=1). You should place it in ./data and change the corresponding infos. Specifically, you need to change the 'lidar2img', 'intrinsic' and 'data_path' as the extrinsic matrix, intrinsic matrix and path of your multi-camera images. Note that the order of frames should be same to their timestamps. 'occ_path' in this pickle file indicates the save path and you will get raw results (.npy) and point coulds (.ply) in './visual_dir' for further visualization. You can use meshlab to directly visualize .ply files. Or you can run tools/visual.py to visualize .npy files. 
-```
-./tools/dist_inference.sh ./projects/configs/surroundocc/surroundocc_inference.py ./path/to/ckpts.pth 8
+**1. Create a conda virtual environment and activate it.**
+```shell
+conda create -n surroundocc python=3.7 -y
+conda activate surroundocc
 ```
 
-### Ground truth generation
-You can also generate dense occupancy labels with your own data! We provide a highly extensible code to achieve [this](https://github.com/weiyithu/SurroundOcc/blob/main/tools/generate_occupancy_with_own_data/process_your_own_data.py). We provide an example [sequence](https://cloud.tsinghua.edu.cn/f/94fea6c8be4448168667/?dl=1) and you need to prepare your data like this:
+**2. Install PyTorch and torchvision (tested on torch==1.10.1 & cuda=11.3).**
+```shell
+pip install torch==1.9.1+cu111 torchvision==0.10.1+cu111 torchaudio==0.9.1 -f https://download.pytorch.org/whl/torch_stable.html
+```
+
+**3. Install gcc>=5 in conda env.**
+```shell
+conda install -c omgarcia gcc-6 # gcc-6.2
+```
+
+**4. Install MMCV following the [official instructions](https://github.com/open-mmlab/mmcv).**
+```shell
+pip install mmcv-full==1.4.0
+```
+
+**5. Install mmdet and mmseg.**
+```shell
+pip install mmdet==2.14.0
+pip install mmsegmentation==0.14.1
+```
+
+**6. Install mmdet3d from source code.**
+```shell
+git clone https://github.com/open-mmlab/mmdetection3d.git
+cd mmdetection3d
+git checkout v0.17.1 # Other versions may not be compatible.
+python setup.py install
+```
+
+**7. Install other dependencies.**
+```shell
+pip install timm
+pip install open3d-python
+```
+
+**8. Install Chamfer Distance.**
+```shell
+cd SurroundOcc/extensions/chamfer_dist
+python setup.py install --user
+```
+
+**9. Prepare pretrained models.**
+```shell
+cd SurroundOcc 
+mkdir ckpts
+
+cd ckpts & wget https://github.com/zhiqi-li/storage/releases/download/v1.0/r101_dcn_fcos3d_pretrain.pth
+```
+
+#### Data
+
+**1. Download nuScenes V1.0 full dataset data [HERE](https://www.nuscenes.org/download). Folder structure:**
+```
+SurroundOcc
+├── data/
+│   ├── nuscenes/
+│   │   ├── maps/
+│   │   ├── samples/
+│   │   ├── sweeps/
+│   │   ├── v1.0-test/
+│   │   ├── v1.0-trainval/
+```
+
+
+**2. Download the generated [train](https://cloud.tsinghua.edu.cn/f/ebbed36c37b248149192/?dl=1)/[val](https://cloud.tsinghua.edu.cn/f/b3f169f4db034764bb87/?dl=1) pickle files and put them in data.**
+
+**3. Download our generated dense occupancy labels (resolution 200x200x16 with voxel size 0.5m) and put and unzip it in data**
+| Subset | Tsinghua Cloud| Size |
+| :---: | :---: | :---: |
+| train | [link](https://cloud.tsinghua.edu.cn/f/f021006560b54bc78349/?dl=1) | 4.3G |
+| val | [link](https://cloud.tsinghua.edu.cn/f/290276f4a4024896b733/?dl=1) | 627M |
+
+**Folder structure:**
+```
+SurroundOcc
+├── data/
+│   ├── nuscenes/
+│   ├── nuscenes_occ/
+│   ├── nuscenes_infos_train.pkl
+│   ├── nuscenes_infos_val.pkl
 
 ```
-your_own_data_folder/
-├── pc/
-│   ├── pc0.npy
-│   ├── pc1.npy
-│   ├── ...
-├── bbox/
-│   ├── bbox0.npy (bounding box of the object)
-│   ├── bbox1.npy
-│   ├── ...
-│   ├── object_category0.npy (semantic category of the object)
-│   ├── object_category1.npy
-│   ├── ...
-│   ├── boxes_token0.npy (Unique bbox codes used to combine the same object in different frames)
-│   ├── boxes_token1.npy
-│   ├── ...
-├── calib/
-│   ├── lidar_calibrated_sensor0.npy
-│   ├── lidar_calibrated_sensor1.npy
-│   ├── ...
-├── pose/
-│   ├── lidar_ego_pose0.npy
-│   ├── lidar_ego_pose1.npy
-│   ├── ...
+
+***4. (Optional) We also provide the code to generate occupancy on nuScenes, which needs LiDAR point semantic labels [HERE](https://www.nuscenes.org/download). Folder structure:**
 ```
-You can generate occupancy labels with or without semantics (via acitivating --with semantic). If your LiDAR is high-resolution, e.g. RS128, LiVOX and M1, you can skip Poisson reconstruction step and the generation processe will be very fast! You can change the point cloud range and voxel size in config.yaml.
+SurroundOcc
+├── data/
+│   ├── nuscenes/
+│   │   ├── maps/
+│   │   ├── samples/
+│   │   ├── sweeps/
+│   │   ├── v1.0-test/
+│   │   ├── v1.0-trainval/
+|   |   ├── lidarseg
+|   |   |   ├── v1.0-test
+|   |   |   ├── v1.0-trainval
+|   |   |   ├── v1.0-mini
+```
+
+You can generate train/val split of nuScenes from 850 sequences. 
+
 ```
 cd $Home/tools/generate_occupancy_nuscenes
-python process_your_own_data.py --to_mesh --with_semantic --data_path $your_own_data_folder$ --len_sequence $frame number$
+python generate_occupancy_nuscenes.py --config_path ./config.yaml --label_mapping ./nuscenes.yaml --split [train/val] --save_path [your/save/path] 
 ```
 
+#### Train and Test
 
-## Acknowledgement
-Many thanks to these excellent projects:
-- [BEVFormer](https://github.com/fundamentalvision/BEVFormer)
-- [MonoScene](https://github.com/astra-vision/MonoScene)
-
-Related Projects:
-- [TPVFormer](https://github.com/wzzheng/TPVFormer)
-- [OpenOccupancy](https://github.com/JeffWang987/OpenOccupancy)
-
-## Bibtex
-If this work is helpful for your research, please consider citing the following BibTeX entry.
-
+Train SurroundOcc with 8 RTX3090 GPUs 
 ```
-@article{wei2023surroundocc, 
-      title={SurroundOcc: Multi-Camera 3D Occupancy Prediction for Autonomous Driving}, 
-      author={Yi Wei and Linqing Zhao and Wenzhao Zheng and Zheng Zhu and Jie Zhou and Jiwen Lu},
-      journal={arXiv preprint arXiv:2303.09551},
-      year={2023}
-}
+./tools/dist_train.sh ./projects/configs/surroundocc/surroundocc.py 8  ./work_dirs/surroundocc
 ```
 
+Eval SurroundOcc with 8 RTX3090 GPUs
+```
+./tools/dist_test.sh ./projects/configs/surroundocc/surroundocc.py ./path/to/ckpts.pth 8
+```
+You can substitute surroundocc.py with surroundocc_nosemantic.py for 3D scene reconstruction task.
+
+Visualize occupancy predictions:
+
+First, you need to generate prediction results. Here we use whole validation set as an example.
+```
+cp ./data/nuscenes_infos_val.pkl ./data/infos_inference.pkl
+./tools/dist_inference.sh ./projects/configs/surroundocc/surroundocc_inference.py ./path/to/ckpts.pth 8
+```
+You will get prediction results in './visual_dir'. You can directly use meshlab to visualize .ply files or run visual.py to visualize raw .npy files with mayavi:
+```
+cd ./tools
+python visual.py $npy_path$
+```

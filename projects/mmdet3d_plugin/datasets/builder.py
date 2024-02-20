@@ -1,6 +1,5 @@
 
 # Copyright (c) OpenMMLab. All rights reserved.
-import copy
 import platform
 import random
 from functools import partial
@@ -12,9 +11,9 @@ from mmcv.utils import Registry, build_from_cfg
 from torch.utils.data import DataLoader
 
 from mmdet.datasets.samplers import GroupSampler
-from projects.mmdet3d_plugin.datasets.samplers.group_sampler import DistributedGroupSampler
-from projects.mmdet3d_plugin.datasets.samplers.distributed_sampler import DistributedSampler
-from projects.mmdet3d_plugin.datasets.samplers.sampler import build_sampler
+from projects.mmdet3d_plugin.datasets.samplers import DistributedGroupSampler
+from projects.mmdet3d_plugin.datasets.samplers import DistributedSampler
+from projects.mmdet3d_plugin.datasets.samplers import build_sampler
 
 def build_dataloader(dataset,
                      samples_per_gpu,
