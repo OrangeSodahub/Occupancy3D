@@ -1,38 +1,24 @@
-# ---------------------------------------------
-# Copyright (c) OpenMMLab. All rights reserved.
-# ---------------------------------------------
-#  Modified by Zhiqi Li
-# ---------------------------------------------
-import random
+import time
+import os.path as osp
 import warnings
-
-import numpy as np
 import torch
-import torch.distributed as dist
+
 from mmcv.parallel import MMDataParallel, MMDistributedDataParallel
 from mmcv.runner import (HOOKS, DistSamplerSeedHook, EpochBasedRunner,
                          Fp16OptimizerHook, OptimizerHook, build_optimizer,
-                         build_runner, get_dist_info)
+                         build_runner)
 from mmcv.utils import build_from_cfg
-
 from mmdet.core import EvalHook
-
-from mmdet.datasets import (build_dataset,
-                            replace_ImageToTensor)
+from mmdet.datasets import replace_ImageToTensor
 from mmdet.utils import get_root_logger
-import time
-import os.path as osp
+
 from projects.mmdet3d_plugin.datasets.builder import build_dataloader
 from projects.mmdet3d_plugin.core.evaluation.eval_hooks import CustomDistEvalHook
 from projects.mmdet3d_plugin.datasets import custom_build_dataset
-def custom_train_detector(model,
-                   dataset,
-                   cfg,
-                   distributed=False,
-                   validate=False,
-                   timestamp=None,
-                   eval_model=None,
-                   meta=None):
+
+
+def custom_train_detector(model, dataset, cfg, distributed=False, validate=False, timestamp=None,
+                          eval_model=None, meta=None):
     logger = get_root_logger(cfg.log_level)
 
     # prepare data loaders
@@ -40,28 +26,18 @@ def custom_train_detector(model,
     dataset = dataset if isinstance(dataset, (list, tuple)) else [dataset]
     #assert len(dataset)==1s
     if 'imgs_per_gpu' in cfg.data:
-        logger.warning('"imgs_per_gpu" is deprecated in MMDet V2.0. '
-                       'Please use "samples_per_gpu" instead')
+        logger.warning('"imgs_per_gpu" is deprecated in MMDet V2.0. Please use "samples_per_gpu" instead')
         if 'samples_per_gpu' in cfg.data:
-            logger.warning(
-                f'Got "imgs_per_gpu"={cfg.data.imgs_per_gpu} and '
-                f'"samples_per_gpu"={cfg.data.samples_per_gpu}, "imgs_per_gpu"'
-                f'={cfg.data.imgs_per_gpu} is used in this experiments')
+            logger.warning(f'Got "imgs_per_gpu"={cfg.data.imgs_per_gpu} and "samples_per_gpu"={cfg.data.samples_per_gpu}, "imgs_per_gpu"'
+                           f'={cfg.data.imgs_per_gpu} is used in this experiments')
         else:
-            logger.warning(
-                'Automatically set "samples_per_gpu"="imgs_per_gpu"='
-                f'{cfg.data.imgs_per_gpu} in this experiments')
+            logger.warning(f'Automatically set "samples_per_gpu" = "imgs_per_gpu" = {cfg.data.imgs_per_gpu} in this experiments')
         cfg.data.samples_per_gpu = cfg.data.imgs_per_gpu
 
     data_loaders = [
-        build_dataloader(
-            ds,
-            cfg.data.samples_per_gpu,
-            cfg.data.workers_per_gpu,
+        build_dataloader(ds, cfg.data.samples_per_gpu, cfg.data.workers_per_gpu,
             # cfg.gpus will be ignored if distributed
-            len(cfg.gpu_ids),
-            dist=distributed,
-            seed=cfg.seed,
+            len(cfg.gpu_ids), dist=distributed, seed=cfg.seed,
             shuffler_sampler=cfg.data.shuffler_sampler,  # dict(type='DistributedGroupSampler'),
             nonshuffler_sampler=cfg.data.nonshuffler_sampler,  # dict(type='DistributedSampler'),
         ) for ds in dataset
@@ -73,25 +49,15 @@ def custom_train_detector(model,
         # Sets the `find_unused_parameters` parameter in
         # torch.nn.parallel.DistributedDataParallel
         print(torch.cuda.current_device(), cfg.gpu_ids)
-        model = MMDistributedDataParallel(
-            model.cuda(),
-            device_ids=[torch.cuda.current_device()],
-            #device_ids=[4,5,7],
-            broadcast_buffers=False,
-            find_unused_parameters=find_unused_parameters)
+        model = MMDistributedDataParallel(model.cuda(), device_ids=[torch.cuda.current_device()],
+                                          broadcast_buffers=False, find_unused_parameters=find_unused_parameters)
         if eval_model is not None:
-            eval_model = MMDistributedDataParallel(
-                eval_model.cuda(),
-                device_ids=[torch.cuda.current_device()],
-                broadcast_buffers=False,
-                find_unused_parameters=find_unused_parameters)
+            eval_model = MMDistributedDataParallel(eval_model.cuda(), device_ids=[torch.cuda.current_device()],
+                                                   broadcast_buffers=False, find_unused_parameters=find_unused_parameters)
     else:
-        model = MMDataParallel(
-            model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
+        model = MMDataParallel(model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
         if eval_model is not None:
-            eval_model = MMDataParallel(
-                eval_model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
-
+            eval_model = MMDataParallel(eval_model.cuda(cfg.gpu_ids[0]), device_ids=cfg.gpu_ids)
 
     # build runner
     optimizer = build_optimizer(model, cfg.optimizer)
@@ -107,25 +73,14 @@ def custom_train_detector(model,
     else:
         if 'total_epochs' in cfg:
             assert cfg.total_epochs == cfg.runner.max_epochs
+
     if eval_model is not None:
-        runner = build_runner(
-            cfg.runner,
-            default_args=dict(
-                model=model,
-                eval_model=eval_model,
-                optimizer=optimizer,
-                work_dir=cfg.work_dir,
-                logger=logger,
-                meta=meta))
+        runner = build_runner(cfg.runner, default_args=dict(model=model, eval_model=eval_model,
+                                                            optimizer=optimizer, work_dir=cfg.work_dir,
+                                                            logger=logger, meta=meta))
     else:
-        runner = build_runner(
-            cfg.runner,
-            default_args=dict(
-                model=model,
-                optimizer=optimizer,
-                work_dir=cfg.work_dir,
-                logger=logger,
-                meta=meta))
+        runner = build_runner(cfg.runner, default_args=dict(model=model, optimizer=optimizer,
+                                                            work_dir=cfg.work_dir, logger=logger, meta=meta))
 
     # an ugly workaround to make .log and .log.json filenames the same
     runner.timestamp = timestamp
@@ -133,8 +88,7 @@ def custom_train_detector(model,
     # fp16 setting
     fp16_cfg = cfg.get('fp16', None)
     if fp16_cfg is not None:
-        optimizer_config = Fp16OptimizerHook(
-            **cfg.optimizer_config, **fp16_cfg, distributed=distributed)
+        optimizer_config = Fp16OptimizerHook( **cfg.optimizer_config, **fp16_cfg, distributed=distributed)
     elif distributed and 'type' not in cfg.optimizer_config:
         optimizer_config = OptimizerHook(**cfg.optimizer_config)
     else:
@@ -198,5 +152,5 @@ def custom_train_detector(model,
         runner.resume(cfg.resume_from)
     elif cfg.load_from:
         runner.load_checkpoint(cfg.load_from)
-    runner.run(data_loaders, cfg.workflow)
 
+    runner.run(data_loaders, cfg.workflow)

@@ -1,8 +1,3 @@
-# ---------------------------------------------
-# Copyright (c) OpenMMLab. All rights reserved.
-# ---------------------------------------------
-#  Modified by Zhiqi Li
-# ---------------------------------------------
 import argparse
 import mmcv
 import os
