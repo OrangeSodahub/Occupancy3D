@@ -13,8 +13,8 @@ from mmdet.datasets import replace_ImageToTensor
 from mmdet.utils import get_root_logger
 
 from projects.mmdet3d_plugin.datasets.builder import build_dataloader
-from projects.mmdet3d_plugin.core.evaluation.eval_hooks import CustomDistEvalHook
 from projects.mmdet3d_plugin.datasets import custom_build_dataset
+from projects.mmdet3d_plugin.surroundocc.hooks import CustomDistEvalHook
 
 
 def custom_train_detector(model, dataset, cfg, distributed=False, validate=False, timestamp=None,

@@ -11,7 +11,7 @@ from mmdet.datasets.builder import PIPELINES
 from mmdet.datasets.pipelines import to_tensor
 from mmdet3d.core.points import get_points_type
 from mmdet3d.datasets.pipelines.loading import LoadPointsFromFile
-from mmdet3d.datasets import DefaultFormatBundle3D
+from mmdet3d.datasets.pipelines.formating import DefaultFormatBundle3D
 
 @PIPELINES.register_module()
 class CustomDefaultFormatBundle3D(DefaultFormatBundle3D):

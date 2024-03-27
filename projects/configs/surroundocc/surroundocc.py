@@ -43,7 +43,7 @@ _num_points_ = [2, 4, 8]
 _num_layers_ = [1, 3, 6]
 
 model = dict(
-    type='SurroundOcc',
+    type='Occ',
     use_grid_mask=True,
     use_semantic=use_semantic,
     use_points=use_points,
@@ -56,7 +56,7 @@ model = dict(
        norm_cfg=dict(type='BN2d', requires_grad=False),
        norm_eval=True,
        style='caffe',
-       #with_cp=True, # using checkpoint to save GPU memory
+       with_cp=True, # using checkpoint to save GPU memory
        dcn=dict(type='DCNv2', deform_groups=1, fallback_on_stride=False), # original DCNv2 will print log when perform load_state_dict
        stage_with_dcn=(False, False, True, True)),
     img_neck=dict(
